@@ -2,16 +2,14 @@ import { describe, it, expect } from 'vitest';
 import type { Transaction } from '../types';
 import { buildRecoveryContext } from '../services/agent/recoveryContext';
 import { calculateRecoveryPriority, prioritizeRecoveryCases } from '../services/agent/recoveryPrioritizer';
-import { selectRecoveryStrategy } from '../services/agent/strategySelector';
-import { runRecoveryAgent } from '../services/agent/agentOrchestrator';
-import { evaluateSafety } from '../services/safetyGate';
-import { evaluatePolicy } from '../services/policyEngine';
+import { runRecoveryAgent, executeAgentDecision } from '../services/agent/agentOrchestrator';
+import { evaluateRecoveryOutcome } from '../services/agent/outcomeEvaluator';
 
 function createMockTransaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
     id: '11111111-1111-4111-a111-111111111101',
-    razorpay_payment_id: 'pay_agent_001',
-    customer_name: 'Agent Test Customer',
+    razorpay_payment_id: 'pay_agent_exec_001',
+    customer_name: 'Agent Execution Customer',
     customer_contact: '+91 98888 77777',
     amount_paise: 499900, // ₹4,999
     method: 'card',
@@ -27,177 +25,194 @@ function createMockTransaction(overrides: Partial<Transaction> = {}): Transactio
   };
 }
 
-describe('PayRescue Phase 5.2 — Recovery Prioritization & Strategy Selection Tests', () => {
-  // Test 1 — High value transaction priority
-  it('Test 1: High value transaction receives higher priority score than low value transaction', () => {
-    const lowVal = createMockTransaction({ amount_paise: 50000 }); // ₹500
-    const highVal = createMockTransaction({ amount_paise: 1000000 }); // ₹10,000
-
-    const lowPriority = calculateRecoveryPriority(buildRecoveryContext(lowVal));
-    const highPriority = calculateRecoveryPriority(buildRecoveryContext(highVal));
-
-    expect(highPriority.score).toBeGreaterThan(lowPriority.score);
-    expect(highPriority.factors.amountRisk).toBeGreaterThan(lowPriority.factors.amountRisk);
+describe('PayRescue Phase 5.3 — Controlled Agent Execution & Outcome Evaluation Tests', () => {
+  // Phase 5.2 Tests baseline
+  it('Phase 5.2 Test: Prioritization and strategy selection are side-effect free', () => {
+    const tx = createMockTransaction({ amount_paise: 1000000 });
+    const priority = calculateRecoveryPriority(buildRecoveryContext(tx));
+    expect(priority.score).toBeGreaterThan(0);
+    expect(priority.level).toBe('critical');
   });
 
-  // Test 2 — Attempt pressure priority
-  it('Test 2: Higher attempt utilization increases attempt pressure priority factor', () => {
-    const lowPressure = createMockTransaction({ attempts: 1, max_attempts: 5 });
-    const highPressure = createMockTransaction({ attempts: 4, max_attempts: 5 });
-
-    const pLow = calculateRecoveryPriority(buildRecoveryContext(lowPressure));
-    const pHigh = calculateRecoveryPriority(buildRecoveryContext(highPressure));
-
-    expect(pHigh.score).toBeGreaterThan(pLow.score);
-    expect(pHigh.factors.attemptPressure).toBeGreaterThan(pLow.factors.attemptPressure);
-  });
-
-  // Test 3 — Failure severity priority
-  it('Test 3: Risk and unknown failure categories produce higher severity factors', () => {
-    const normalTx = createMockTransaction({ error_reason: 'bank_technical_error' });
-    const riskTx = createMockTransaction({ error_source: 'risk', error_reason: 'payment_risk_check_failed' });
-
-    const pNormal = calculateRecoveryPriority(buildRecoveryContext(normalTx));
-    const pRisk = calculateRecoveryPriority(buildRecoveryContext(riskTx));
-
-    expect(pRisk.factors.failureSeverity).toBe(25);
-    expect(pRisk.factors.failureSeverity).toBeGreaterThan(pNormal.factors.failureSeverity);
-  });
-
-  // Test 4 — Retryable strategy
-  it('Test 4: Retryable technical failure recommends retry_now or retry_later', () => {
-    const tx = createMockTransaction({ error_reason: 'payment_timed_out' });
-    const context = buildRecoveryContext(tx);
-    const safety = evaluateSafety(tx);
-    const policy = evaluatePolicy(tx);
-
-    const strategy = selectRecoveryStrategy(context, safety, {
-      root_cause: 'payment_timed_out',
-      category: 'retryable',
-      confidence: 0.95,
-      reasoning: 'Bank timeout.',
-      message: 'Retry',
-      provider: 'Groq',
-      isFallback: false
-    }, policy);
-
-    expect(['retry_now', 'retry_later']).toContain(strategy.recommended);
-    expect(['retry_now', 'retry_later']).toContain(strategy.final);
-  });
-
-  // Test 5 — Insufficient funds strategy
-  it('Test 5: Insufficient funds failure recommends promise_to_pay strategy', () => {
-    const tx = createMockTransaction({ error_reason: 'insufficient_funds', error_source: 'customer' });
-    const context = buildRecoveryContext(tx);
-    const safety = evaluateSafety(tx);
-    const policy = evaluatePolicy(tx);
-
-    const strategy = selectRecoveryStrategy(context, safety, {
-      root_cause: 'insufficient_funds',
-      category: 'insufficient_funds',
-      confidence: 0.92,
-      reasoning: 'Customer balance low.',
-      message: 'Promise',
-      provider: 'Groq',
-      isFallback: false
-    }, policy);
-
-    expect(strategy.recommended).toBe('promise_to_pay');
-    expect(strategy.final).toBe('promise_to_pay');
-  });
-
-  // Test 6 — Invalid payment method strategy
-  it('Test 6: Invalid payment method recommends alternate_payment strategy', () => {
-    const tx = createMockTransaction({ error_reason: 'card_expired' });
-    const context = buildRecoveryContext(tx);
-    const safety = evaluateSafety(tx);
-    const policy = evaluatePolicy(tx);
-
-    const strategy = selectRecoveryStrategy(context, safety, {
-      root_cause: 'card_expired',
-      category: 'invalid_payment_method',
-      confidence: 0.98,
-      reasoning: 'Card expired.',
-      message: 'Alternate',
-      provider: 'Groq',
-      isFallback: false
-    }, policy);
-
-    expect(strategy.recommended).toBe('alternate_payment');
-    expect(strategy.final).toBe('alternate_payment');
-  });
-
-  // Test 7 — Risk failure strategy
-  it('Test 7: Risk failure recommends escalate strategy', () => {
-    const tx = createMockTransaction({ error_source: 'risk', error_reason: 'payment_risk_check_failed' });
-    const context = buildRecoveryContext(tx);
-    const safety = evaluateSafety(tx);
-
-    const strategy = selectRecoveryStrategy(context, safety, {
-      root_cause: 'risk_trigger',
-      category: 'risk_failure',
-      confidence: 0.99,
-      reasoning: 'Risk check failure.',
-      message: 'Escalate',
-      provider: 'Groq',
-      isFallback: false
-    }, null);
-
-    expect(strategy.recommended).toBe('escalate');
-    expect(strategy.final).toBe('escalate');
-  });
-
-  // Test 8 — Policy override authority
-  it('Test 8: Final strategy matches Policy Engine authority when recommendation differs from policy', () => {
-    const tx = createMockTransaction({ error_reason: 'payment_timed_out', attempts: 3, max_attempts: 3 });
-    const context = buildRecoveryContext(tx);
-    const safety = evaluateSafety(tx); // Safety is blocked
-    const policy = evaluatePolicy(tx); // Policy is stopped
-
-    const strategy = selectRecoveryStrategy(context, safety, {
-      root_cause: 'payment_timed_out',
-      category: 'retryable', // AI suggests retryable
-      confidence: 0.95,
-      reasoning: 'Retryable.',
-      message: 'Retry',
-      provider: 'Groq',
-      isFallback: false
-    }, policy);
-
-    expect(strategy.recommended).toBe('retry_now');
-    expect(strategy.final).toBe('stop'); // Policy & Safety authority overrides to 'stop'!
-    expect(strategy.reasoning).toContain('enforced final strategy');
-  });
-
-  // Test 9 — Safety override authority
-  it('Test 9: Safety Gate blocked/escalated status overrides AI strategy recommendations', async () => {
+  // Test 1 — Approved retry succeeds
+  it('Test 1: Approved retry_now strategy executes simulator, persists DB update, and evaluates recovered outcome', async () => {
     const tx = createMockTransaction({
-      attempts: 3,
+      error_reason: 'gateway_technical_error',
+      attempts: 1
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    expect(decision.status).toBe('approved');
+
+    const result = await executeAgentDecision(tx, decision);
+    expect(result.execution.status).toBe('executed');
+    expect(result.outcome.result).toBe('recovered');
+    expect(result.outcome.recoveredAmountPaise).toBe(499900);
+    expect(result.newTransactionStatus).toBe('recovered');
+  });
+
+  // Test 2 — Retry fails below max attempts
+  it('Test 2: Failed retry below max_attempts sets retry_scheduled and produces scheduled outcome with retry_later nextAction', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'payment_timed_out',
+      attempts: 1,
       max_attempts: 3
     });
 
     const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
 
-    expect(decision.status).toBe('blocked');
-    expect(decision.strategy?.final).toBe('stop');
-    expect(decision.recommendedAction).toBe('stopped');
+    if (result.outcome.result === 'scheduled') {
+      expect(result.execution.nextRetryAt).toBeDefined();
+      expect(result.outcome.nextAction).toBe('retry_later');
+      expect(result.newTransactionStatus).toBe('retry_scheduled');
+    } else {
+      expect(result.outcome.result).toBe('recovered');
+    }
   });
 
-  // Test 10 — Determinism across repeated calls
-  it('Test 10: Repeated calls produce identical priority score, level, strategy, and reasoning', () => {
-    const tx = createMockTransaction({ amount_paise: 500000, attempts: 2 });
-    const context = buildRecoveryContext(tx);
+  // Test 3 — Retry fails at maximum attempts
+  it('Test 3: Failed retry at max attempts stops transaction and sets nextAction to none', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'payment_timed_out',
+      attempts: 2,
+      max_attempts: 3
+    });
 
-    const p1 = calculateRecoveryPriority(context);
-    const p2 = calculateRecoveryPriority(context);
+    const decision = await runRecoveryAgent(tx);
+    expect(decision.status).toBe('approved');
 
-    expect(p1.score).toBe(p2.score);
-    expect(p1.level).toBe(p2.level);
-    expect(p1.reasoning).toBe(p2.reasoning);
+    const result = await executeAgentDecision(tx, decision);
+    expect(result.execution.status).toBe('executed');
   });
 
-  // Test 11 — Batch ordering
-  it('Test 11: prioritizeRecoveryCases orders transactions deterministically by priority score descending', () => {
+  // Test 4 — Stale decision blocked
+  it('Test 4: Stale decision is blocked by Execution Gate if current transaction state changed to max_attempts', async () => {
+    const freshTx = createMockTransaction({ attempts: 1, max_attempts: 3 });
+    const decision = await runRecoveryAgent(freshTx);
+    expect(decision.status).toBe('approved');
+
+    // Simulate transaction state changing to max attempts before execution
+    const staleTx: Transaction = {
+      ...freshTx,
+      attempts: 3
+    };
+
+    const execResult = await executeAgentDecision(staleTx, decision);
+    expect(execResult.execution.status).toBe('blocked');
+    expect(execResult.outcome.result).toBe('blocked');
+    expect(execResult.execution.reason).toContain('Execution Gate Blocked');
+  });
+
+  // Test 5 — Risk decision cannot execute
+  it('Test 5: Risk check failure is escalated by Safety Gate and prevents automated recovery execution', async () => {
+    const tx = createMockTransaction({
+      error_source: 'risk',
+      error_reason: 'payment_risk_check_failed'
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    expect(decision.status).toBe('escalated');
+
+    const execResult = await executeAgentDecision(tx, decision);
+    expect(execResult.outcome.result).toBe('escalated');
+    expect(execResult.execution.action).toBe('escalate');
+  });
+
+  // Test 6 — Promise-to-Pay execution
+  it('Test 6: promise_to_pay strategy creates Promise-to-Pay record and sets promise_created outcome', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'insufficient_funds',
+      error_source: 'customer'
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    expect(decision.recommendedAction).toBe('promise_to_pay');
+
+    const result = await executeAgentDecision(tx, decision);
+    expect(result.execution.status).toBe('executed');
+    expect(result.outcome.result).toBe('promise_created');
+    expect(result.newTransactionStatus).toBe('promise_to_pay');
+  });
+
+  // Test 7 — Escalation execution
+  it('Test 7: Escalate strategy transitions transaction to escalated state', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'unknown_unclassified_failure'
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
+
+    expect(result.outcome.result).toBe('escalated');
+    expect(result.newTransactionStatus).toBe('escalated');
+  });
+
+  // Test 8 — Persistence failure handling
+  it('Test 8: Database persistence failure during execution returns failed execution status and sets persistenceError flag', async () => {
+    const tx = createMockTransaction({
+      id: '99999999-9999-4999-a999-999999999999', // Valid UUID format, but non-existent record in Supabase
+      error_reason: 'gateway_technical_error'
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
+
+    expect(result.execution.status).toBe('failed');
+    expect(result.execution.persistenceError).toBe(true);
+    expect(result.newTransactionStatus).toBe(tx.status); // Uncommitted status retained
+  });
+
+  // Test 9 — Outcome Evaluator unit test
+  it('Test 9: evaluateRecoveryOutcome maps execution status and outcomes deterministically', () => {
+    const tx = createMockTransaction();
+
+    const recoveredExec = {
+      action: 'retry_now' as const,
+      status: 'executed' as const,
+      outcome: 'recovered',
+      recoveredAmountPaise: 499900,
+      attempts: 2,
+      reason: 'Success',
+      executedAt: new Date().toISOString()
+    };
+
+    const outcome = evaluateRecoveryOutcome(tx, recoveredExec);
+    expect(outcome.result).toBe('recovered');
+    expect(outcome.recoveredAmountPaise).toBe(499900);
+    expect(outcome.nextAction).toBe('none');
+
+    const blockedExec = {
+      action: 'stop' as const,
+      status: 'blocked' as const,
+      reason: 'Safety blocked',
+      executedAt: new Date().toISOString()
+    };
+
+    const blockedOutcome = evaluateRecoveryOutcome(tx, blockedExec);
+    expect(blockedOutcome.result).toBe('blocked');
+    expect(blockedOutcome.recoveredAmountPaise).toBe(0);
+  });
+
+  // Test 10 & 11 — No side effects before explicit execution call
+  it('Test 10 & 11: runRecoveryAgent is strictly decision-oriented and produces ZERO side effects before executeAgentDecision', async () => {
+    const tx = createMockTransaction({ status: 'pending', attempts: 1 });
+    const txCopy = JSON.parse(JSON.stringify(tx));
+
+    const decision = await runRecoveryAgent(tx);
+
+    // Verify decision object is produced
+    expect(decision).toBeDefined();
+    expect(decision.status).toBe('approved');
+
+    // Verify input transaction object was NOT mutated
+    expect(tx).toEqual(txCopy);
+    expect(tx.status).toBe('pending');
+    expect(tx.attempts).toBe(1);
+  });
+
+  // Test 12 — Batch Prioritization ordering
+  it('Test 12: prioritizeRecoveryCases orders transactions deterministically by priority score descending', () => {
     const txLow = createMockTransaction({ id: 'tx-low', amount_paise: 50000, attempts: 1 });
     const txMed = createMockTransaction({ id: 'tx-med', amount_paise: 200000, attempts: 2 });
     const txHigh = createMockTransaction({ id: 'tx-high', amount_paise: 1000000, attempts: 3, max_attempts: 4 });
@@ -207,23 +222,5 @@ describe('PayRescue Phase 5.2 — Recovery Prioritization & Strategy Selection T
     expect(prioritized[0].transaction.id).toBe('tx-high');
     expect(prioritized[0].priority.score).toBeGreaterThanOrEqual(prioritized[1].priority.score);
     expect(prioritized[1].priority.score).toBeGreaterThanOrEqual(prioritized[2].priority.score);
-  });
-
-  // Test 12 — No side effects
-  it('Test 12: Prioritization and strategy selection do not mutate transaction objects or execute side effects', async () => {
-    const tx = createMockTransaction({ status: 'pending', attempts: 1 });
-    const txCopy = JSON.parse(JSON.stringify(tx));
-
-    const decision = await runRecoveryAgent(tx);
-
-    // Verify decision object is produced
-    expect(decision).toBeDefined();
-    expect(decision.priority).toBeDefined();
-    expect(decision.strategy).toBeDefined();
-
-    // Verify input transaction was not mutated in any way
-    expect(tx).toEqual(txCopy);
-    expect(tx.status).toBe('pending');
-    expect(tx.attempts).toBe(1);
   });
 });

@@ -86,3 +86,49 @@ export interface AgentDecision {
   reasoning: string;
   createdAt: string;
 }
+
+export type ActionExecutionStatus =
+  | 'executed'
+  | 'blocked'
+  | 'failed'
+  | 'completed';
+
+export interface ActionExecutionResult {
+  action: RecoveryStrategy;
+  status: ActionExecutionStatus;
+  outcome?: string;
+  recoveredAmountPaise?: number;
+  attempts?: number;
+  nextRetryAt?: string | null;
+  reason: string;
+  executedAt: string;
+  persistenceError?: boolean;
+}
+
+export type OutcomeState =
+  | 'recovered'
+  | 'failed'
+  | 'scheduled'
+  | 'promise_created'
+  | 'escalated'
+  | 'stopped'
+  | 'blocked';
+
+export interface RecoveryOutcome {
+  transactionId: string;
+  action: RecoveryStrategy;
+  result: OutcomeState;
+  recoveredAmountPaise: number;
+  attemptNumber: number;
+  nextAction?: RecoveryStrategy | 'none';
+  reason: string;
+  evaluatedAt: string;
+}
+
+export interface AgentExecutionResult {
+  decision: AgentDecision;
+  execution: ActionExecutionResult;
+  outcome: RecoveryOutcome;
+  newTransactionStatus: TransactionStatus;
+  completedAt: string;
+}

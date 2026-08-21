@@ -1,25 +1,23 @@
-import type { Transaction } from '../../types';
-import type { AgentDecision } from './agentTypes';
+import type { Transaction, TransactionStatus } from '../../types';
+import type { AgentDecision, AgentExecutionResult, ActionExecutionResult } from './agentTypes';
 import { buildRecoveryContext } from './recoveryContext';
 import { calculateRecoveryPriority } from './recoveryPrioritizer';
 import { selectRecoveryStrategy } from './strategySelector';
+import { executeRecoveryAction } from './actionExecutor';
+import { evaluateRecoveryOutcome } from './outcomeEvaluator';
 import { evaluateSafety } from '../safetyGate';
 import { evaluatePolicy } from '../policyEngine';
+import { writeAuditLog } from '../auditService';
 import { aiService, isConfidenceAboveThreshold } from '../ai/aiService';
 import type { AIDiagnosisResult } from '../ai/aiTypes';
 
 /**
- * Closed-Loop Recovery Agent Orchestrator (Phase 5.2 Prioritization & Strategy).
+ * Closed-Loop Recovery Agent Decision Orchestrator (Phase 5.1 & 5.2).
  * 
- * Orchestrates recovery reasoning around verified Phase 1-4 bounds:
+ * Side-Effect Free Decision Layer:
  * Context ➔ Priority ➔ Safety Gate ➔ AI Diagnosis ➔ AI Confidence Gate ➔ Strategy Selection ➔ Policy Engine ➔ Agent Decision
  * 
- * Enforces:
- * 1. Safety Precedence: If Safety Gate blocks/escalates, AI and Policy execution are skipped.
- * 2. Deterministic Prioritization: Calculates priority score (0-100) and factors.
- * 3. AI Intelligence: AI provides diagnosis, category, confidence & reasoning.
- * 4. Policy Authority: Recommended strategy is overridden by Policy Engine final authority.
- * 5. Side-effect free: Pure decision orchestration without status mutation or automatic payment execution.
+ * Does NOT execute payment retries or mutate database records.
  */
 export async function runRecoveryAgent(transaction: Transaction): Promise<AgentDecision> {
   const createdAt = new Date().toISOString();
@@ -118,5 +116,98 @@ export async function runRecoveryAgent(transaction: Transaction): Promise<AgentD
     recommendedAction: policy.action,
     reasoning: `[Agent Orchestrator]: Priority ${priority.level.toUpperCase()} (${priority.score}/100). AI diagnosed '${aiDiagnosis.category}' (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). Policy Engine authorized '${policy.action}'. ${strategy.reasoning}`,
     createdAt
+  };
+}
+
+/**
+ * Closed-Loop Recovery Agent Execution Orchestrator (Phase 5.3 Controlled Execution).
+ * 
+ * Performs controlled execution of an AgentDecision against current transaction state:
+ * Current Transaction ➔ Stale Decision Execution Gate ➔ Action Executor ➔ Outcome Evaluator ➔ Persistence ➔ Audit Trail
+ */
+export async function executeAgentDecision(
+  currentTransaction: Transaction,
+  decision: AgentDecision
+): Promise<AgentExecutionResult> {
+  const completedAt = new Date().toISOString();
+
+  // 1. Execution Gate & Stale Decision Protection: Re-evaluate Safety & Policy against current transaction state
+  const currentSafety = evaluateSafety(currentTransaction);
+
+  // Check if current safety gate blocks execution (e.g. max attempts reached or state changed since decision)
+  if (currentSafety.decision === 'blocked') {
+    const blockedExecution: ActionExecutionResult = {
+      action: decision.strategy?.final || 'stop',
+      status: 'blocked',
+      outcome: 'blocked',
+      attempts: currentTransaction.attempts,
+      reason: `Execution Gate Blocked: Current transaction state (${currentTransaction.status}, attempts: ${currentTransaction.attempts}/${currentTransaction.max_attempts}) fails safety rules: ${currentSafety.reason}`,
+      executedAt: completedAt
+    };
+
+    const outcome = evaluateRecoveryOutcome(currentTransaction, blockedExecution);
+
+    await writeAuditLog({
+      transaction_id: currentTransaction.id,
+      actor: 'system_rule',
+      event_type: 'execution_blocked',
+      root_cause: currentTransaction.error_reason,
+      ai_confidence: decision.diagnosis?.confidence ?? null,
+      action_taken: 'blocked',
+      decision_reason: blockedExecution.reason,
+      attempt_number: currentTransaction.attempts
+    });
+
+    return {
+      decision,
+      execution: blockedExecution,
+      outcome,
+      newTransactionStatus: currentTransaction.status,
+      completedAt
+    };
+  }
+
+  // 2. Select Strategy to Execute (Policy Engine & Safety Gate authority MUST win over recommended strategy!)
+  let strategyToExecute = decision.strategy?.final || 'stop';
+  if (currentSafety.decision === 'escalated') {
+    strategyToExecute = 'escalate';
+  }
+
+  // 3. Execute Recovery Strategy
+  const execution = await executeRecoveryAction(currentTransaction, strategyToExecute);
+
+  // 4. Evaluate Structured Recovery Outcome
+  const outcome = evaluateRecoveryOutcome(currentTransaction, execution);
+
+  // Derive new transaction status after execution
+  let newStatus: TransactionStatus = currentTransaction.status;
+  if (execution.status === 'executed' && !execution.persistenceError) {
+    if (execution.outcome === 'recovered') newStatus = 'recovered';
+    else if (execution.outcome === 'retry_scheduled') newStatus = 'retry_scheduled';
+    else if (execution.outcome === 'promise_created') newStatus = 'promise_to_pay';
+    else if (execution.outcome === 'escalated') newStatus = 'escalated';
+    else if (execution.outcome === 'stopped' || execution.outcome === 'alternate_payment_requested') newStatus = 'stopped';
+  }
+
+  // 5. Append Audit Event for Controlled Agent Execution
+  const actor = decision.diagnosis?.isFallback ? 'system_rule' : 'ai_agent';
+  await writeAuditLog({
+    transaction_id: currentTransaction.id,
+    actor,
+    event_type: 'agent_executed',
+    root_cause: decision.diagnosis?.rootCause || currentTransaction.error_reason,
+    ai_confidence: decision.diagnosis?.confidence ?? null,
+    action_taken: execution.outcome || strategyToExecute,
+    decision_reason: `[Agent Execution]: Action '${strategyToExecute}' executed with outcome '${outcome.result}'. ${execution.reason}`,
+    reasoning: decision.reasoning,
+    attempt_number: execution.attempts ?? currentTransaction.attempts
+  });
+
+  return {
+    decision,
+    execution,
+    outcome,
+    newTransactionStatus: newStatus,
+    completedAt
   };
 }
