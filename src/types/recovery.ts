@@ -55,6 +55,7 @@ export interface RecoveryEngineResult {
   simulationResult?: SimulationResult;
   decisionReason: string;
   error?: string;
+  persistenceError?: boolean;
 }
 
 export interface BatchRecoverySummary {
@@ -79,10 +80,12 @@ export interface RecoveryFunnelMetrics {
 
 export interface RecoveryMetrics {
   totalTransactions: number;
-  totalAtRiskPaise: number;
-  totalRecoveredPaise: number;
-  remainingAtRiskPaise: number;
-  recoveryRate: number; // percentage (0 - 100)
+  totalFailedExposurePaise: number; // Historical sum of all failed transaction amounts
+  currentlyAtRiskPaise: number;     // Currently unresolved financial exposure (pending, retry_scheduled, promise_to_pay)
+  totalAtRiskPaise: number;         // Backward compatibility alias for totalFailedExposurePaise
+  totalRecoveredPaise: number;      // Sum of recovered amounts
+  remainingAtRiskPaise: number;     // Alias for currentlyAtRiskPaise
+  recoveryRate: number;             // percentage (0 - 100)
   recoveredCount: number;
   escalatedCount: number;
   stoppedCount: number;

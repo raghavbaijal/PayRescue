@@ -1,10 +1,13 @@
 import type { Transaction } from '../types';
 import type { RecoveryMetrics } from '../types/recovery';
+import { evaluateSafety } from './safetyGate';
 
 export function calculateRecoveryMetrics(transactions: Transaction[]): RecoveryMetrics {
   if (!transactions || transactions.length === 0) {
     return {
       totalTransactions: 0,
+      totalFailedExposurePaise: 0,
+      currentlyAtRiskPaise: 0,
       totalAtRiskPaise: 0,
       totalRecoveredPaise: 0,
       remainingAtRiskPaise: 0,
@@ -26,7 +29,8 @@ export function calculateRecoveryMetrics(transactions: Transaction[]): RecoveryM
     };
   }
 
-  let totalAtRiskPaise = 0;
+  let totalFailedExposurePaise = 0;
+  let currentlyAtRiskPaise = 0;
   let totalRecoveredPaise = 0;
 
   let recoveredCount = 0;
@@ -40,14 +44,16 @@ export function calculateRecoveryMetrics(transactions: Transaction[]): RecoveryM
   let interventionCount = 0;
 
   for (const t of transactions) {
-    totalAtRiskPaise += t.amount_paise;
+    totalFailedExposurePaise += t.amount_paise;
 
     if (t.error_reason) {
       diagnosedCount++;
     }
 
-    // Check if safety gate would deem eligible (not initial risk / hard failure)
-    if (t.error_source !== 'risk' && t.error_reason !== 'payment_risk_check_failed' && t.error_reason !== 'card_expired') {
+    // ISSUE 3: Single Source of Truth for Safety Eligibility using evaluateSafety()
+    const tempTx: Transaction = { ...t, status: 'pending' };
+    const safetyResult = evaluateSafety(tempTx);
+    if (safetyResult.decision === 'eligible') {
       eligibleCount++;
     }
 
@@ -60,11 +66,18 @@ export function calculateRecoveryMetrics(transactions: Transaction[]): RecoveryM
 
       case 'retry_scheduled':
         interventionCount++;
+        currentlyAtRiskPaise += t.amount_paise;
         break;
 
       case 'promise_to_pay':
         activeP2PCount++;
         interventionCount++;
+        currentlyAtRiskPaise += t.amount_paise;
+        break;
+
+      case 'pending':
+        pendingCount++;
+        currentlyAtRiskPaise += t.amount_paise;
         break;
 
       case 'escalated':
@@ -75,24 +88,22 @@ export function calculateRecoveryMetrics(transactions: Transaction[]): RecoveryM
         stoppedCount++;
         break;
 
-      case 'pending':
-        pendingCount++;
-        break;
-
       default:
         break;
     }
   }
 
-  const remainingAtRiskPaise = Math.max(0, totalAtRiskPaise - totalRecoveredPaise);
+  const remainingAtRiskPaise = currentlyAtRiskPaise;
   const recoveryRate =
-    totalAtRiskPaise > 0
-      ? Number(((totalRecoveredPaise / totalAtRiskPaise) * 100).toFixed(1))
+    totalFailedExposurePaise > 0
+      ? Number(((totalRecoveredPaise / totalFailedExposurePaise) * 100).toFixed(1))
       : 0;
 
   return {
     totalTransactions: transactions.length,
-    totalAtRiskPaise,
+    totalFailedExposurePaise,
+    currentlyAtRiskPaise,
+    totalAtRiskPaise: totalFailedExposurePaise, // Backward compatibility alias
     totalRecoveredPaise,
     remainingAtRiskPaise,
     recoveryRate,

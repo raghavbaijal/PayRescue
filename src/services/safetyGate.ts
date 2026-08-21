@@ -14,8 +14,8 @@ export function evaluateSafety(transaction: Transaction): SafetyResult {
     };
   }
 
-  // Rule 4 — Valid transaction state check (Only 'pending' is eligible)
-  if (transaction.status !== 'pending') {
+  // Rule 4 — Valid transaction state check (Only 'pending' or 'retry_scheduled' are eligible for safety evaluation)
+  if (transaction.status !== 'pending' && transaction.status !== 'retry_scheduled') {
     if (transaction.status === 'recovered') {
       return {
         decision: 'blocked',
@@ -78,7 +78,7 @@ export function evaluateSafety(transaction: Transaction): SafetyResult {
     };
   }
 
-  // Cleared all safety checks
+  // Cleared all safety gates
   return {
     decision: 'eligible',
     reason: 'Transaction cleared all safety gates and is eligible for policy decision.'

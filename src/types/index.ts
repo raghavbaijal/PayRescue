@@ -32,6 +32,7 @@ export interface Transaction {
   attempts: number;
   max_attempts: number;
   status: TransactionStatus;
+  next_retry_at?: string | null;
   created_at: string;
   updated_at: string;
 }

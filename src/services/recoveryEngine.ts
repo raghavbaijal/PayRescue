@@ -11,14 +11,15 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { DEMO_TRANSACTIONS } from '../data/demoData';
 
 /**
- * Persists transaction status and attempt updates to Supabase (or in-memory seed dataset fallback).
+ * Persists transaction status, attempt counters, and retry timestamps to Supabase (or in-memory seed fallback).
  */
-async function updateTransactionInDb(
+export async function updateTransactionInDb(
   transactionId: string,
   newStatus: TransactionStatus,
-  newAttempts?: number
+  newAttempts?: number,
+  nextRetryAt?: string | null
 ): Promise<boolean> {
-  const updatePayload: Partial<Transaction> = {
+  const updatePayload: Record<string, any> = {
     status: newStatus,
     updated_at: new Date().toISOString()
   };
@@ -34,7 +35,10 @@ async function updateTransactionInDb(
     if (newAttempts !== undefined) {
       DEMO_TRANSACTIONS[localIndex].attempts = newAttempts;
     }
-    DEMO_TRANSACTIONS[localIndex].updated_at = updatePayload.updated_at!;
+    if (nextRetryAt !== undefined) {
+      DEMO_TRANSACTIONS[localIndex].next_retry_at = nextRetryAt;
+    }
+    DEMO_TRANSACTIONS[localIndex].updated_at = updatePayload.updated_at;
   }
 
   if (!isSupabaseConfigured()) {
@@ -42,13 +46,14 @@ async function updateTransactionInDb(
   }
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('transactions')
       .update(updatePayload)
-      .eq('id', transactionId);
+      .eq('id', transactionId)
+      .select('id');
 
-    if (error) {
-      console.error(`[Recovery Engine DB Update Error ${transactionId}]:`, error.message);
+    if (error || !data || data.length === 0) {
+      console.error(`[Recovery Engine DB Update Error ${transactionId}]:`, error ? error.message : 'No matching record found in Supabase.');
       return false;
     }
     return true;
@@ -67,7 +72,7 @@ export async function processSingleTransaction(
 ): Promise<RecoveryEngineResult> {
   const initialStatus = transaction.status;
 
-  // 1. Initial Safety Gate Evaluation (Optimization: skip AI call if already resolved / max attempts reached)
+  // 1. Initial Safety Gate Evaluation
   const safety = evaluateSafety(transaction);
   if (safety.decision !== 'eligible') {
     let targetStatus: TransactionStatus = 'stopped';
@@ -81,8 +86,33 @@ export async function processSingleTransaction(
       auditEvent = 'stopped';
     }
 
-    if (initialStatus === 'pending') {
-      await updateTransactionInDb(transaction.id, targetStatus);
+    if (initialStatus === 'pending' || initialStatus === 'retry_scheduled') {
+      const dbSuccess = await updateTransactionInDb(transaction.id, targetStatus);
+      if (!dbSuccess) {
+        await writeAuditLog({
+          transaction_id: transaction.id,
+          actor: 'system_rule',
+          event_type: 'persistence_failed',
+          root_cause: transaction.error_reason,
+          action_taken: safety.actionIfBlocked || targetStatus,
+          decision_reason: `Database update failed while persisting safety gate decision '${targetStatus}'.`,
+          attempt_number: transaction.attempts
+        });
+
+        return {
+          transactionId: transaction.id,
+          razorpayPaymentId: transaction.razorpay_payment_id,
+          previousStatus: initialStatus,
+          newStatus: initialStatus,
+          category: 'unknown',
+          actionTaken: safety.actionIfBlocked || (targetStatus as any),
+          safetyResult: safety,
+          decisionReason: `Database persistence failed while applying safety decision '${targetStatus}'.`,
+          error: 'PERSISTENCE_FAILED: Failed to commit status update to database.',
+          persistenceError: true
+        };
+      }
+
       await writeAuditLog({
         transaction_id: transaction.id,
         actor: 'system_rule',
@@ -107,13 +137,12 @@ export async function processSingleTransaction(
     };
   }
 
-  // 2. AI Diagnosis Layer (Groq GPT-OSS 120B / Deterministic Fallback)
+  // 2. AI Diagnosis Layer (Groq GPT-OSS 120B / Fallback)
   let aiDiagnosis: AIDiagnosisResult;
   try {
     aiDiagnosis = await aiService.diagnoseTransaction(transaction);
   } catch (err) {
     console.warn(`[Recovery Engine AI Exception ${transaction.id}]:`, err);
-    // Safety fallback
     aiDiagnosis = {
       root_cause: transaction.error_reason,
       category: 'unknown',
@@ -130,7 +159,33 @@ export async function processSingleTransaction(
   // 3. AI Confidence Gate Evaluation (Threshold = 0.80)
   if (!isConfidenceAboveThreshold(aiDiagnosis.confidence)) {
     const escalatedStatus: TransactionStatus = 'escalated';
-    await updateTransactionInDb(transaction.id, escalatedStatus);
+    const dbSuccess = await updateTransactionInDb(transaction.id, escalatedStatus);
+
+    if (!dbSuccess) {
+      await writeAuditLog({
+        transaction_id: transaction.id,
+        actor,
+        event_type: 'persistence_failed',
+        root_cause: aiDiagnosis.root_cause,
+        ai_confidence: aiDiagnosis.confidence,
+        action_taken: 'escalated',
+        decision_reason: `Database persistence failed while escalating low-confidence transaction.`,
+        attempt_number: transaction.attempts
+      });
+
+      return {
+        transactionId: transaction.id,
+        razorpayPaymentId: transaction.razorpay_payment_id,
+        previousStatus: initialStatus,
+        newStatus: initialStatus,
+        category: aiDiagnosis.category,
+        actionTaken: 'escalated',
+        safetyResult: safety,
+        decisionReason: `Database persistence failure during confidence gate escalation.`,
+        error: 'PERSISTENCE_FAILED: Failed to commit status update to database.',
+        persistenceError: true
+      };
+    }
 
     const confidencePct = (aiDiagnosis.confidence * 100).toFixed(0);
     const decisionReason = `AI confidence score below 80% threshold (${confidencePct}% < 80%). Automatic recovery blocked; transaction escalated for manual ops review.`;
@@ -163,14 +218,17 @@ export async function processSingleTransaction(
   // 4. Deterministic Policy Engine Evaluation
   const policy = evaluatePolicy(transaction);
 
-  // 5. Action Execution Branching
+  // 5. Action Execution Branching & Persistence Commitment
   let finalStatus: TransactionStatus = 'pending';
   let simulationResult = undefined;
 
   switch (policy.action) {
     case 'promise_to_pay': {
       finalStatus = 'promise_to_pay';
-      await updateTransactionInDb(transaction.id, finalStatus);
+      const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus);
+      if (!dbSuccess) {
+        return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis);
+      }
       await createPromiseToPay(transaction);
 
       await writeAuditLog({
@@ -190,7 +248,10 @@ export async function processSingleTransaction(
 
     case 'alternate_payment': {
       finalStatus = 'stopped';
-      await updateTransactionInDb(transaction.id, finalStatus);
+      const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus);
+      if (!dbSuccess) {
+        return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis);
+      }
       await writeAuditLog({
         transaction_id: transaction.id,
         actor,
@@ -208,7 +269,10 @@ export async function processSingleTransaction(
 
     case 'escalated': {
       finalStatus = 'escalated';
-      await updateTransactionInDb(transaction.id, finalStatus);
+      const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus);
+      if (!dbSuccess) {
+        return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis);
+      }
       await writeAuditLog({
         transaction_id: transaction.id,
         actor,
@@ -226,7 +290,10 @@ export async function processSingleTransaction(
 
     case 'stopped': {
       finalStatus = 'stopped';
-      await updateTransactionInDb(transaction.id, finalStatus);
+      const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus);
+      if (!dbSuccess) {
+        return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis);
+      }
       await writeAuditLog({
         transaction_id: transaction.id,
         actor,
@@ -244,13 +311,18 @@ export async function processSingleTransaction(
 
     case 'retry_scheduled':
     default: {
-      // Execute simulated payment retry
       simulationResult = simulatePaymentExecution(transaction, 'retry_scheduled');
       const nextAttempt = transaction.attempts + 1;
 
       if (simulationResult.outcome === 'recovered') {
         finalStatus = 'recovered';
-        await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
+
+        // ISSUE 1: Verify DB Persistence before claiming recovered!
+        const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus, nextAttempt, null);
+        if (!dbSuccess) {
+          return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis, simulationResult);
+        }
+
         await writeAuditLog({
           transaction_id: transaction.id,
           actor,
@@ -264,10 +336,14 @@ export async function processSingleTransaction(
           attempt_number: nextAttempt
         });
       } else {
-        // Simulation failed
+        // Retry execution simulation failed
         if (nextAttempt >= transaction.max_attempts) {
           finalStatus = 'stopped';
-          await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
+          const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus, nextAttempt, null);
+          if (!dbSuccess) {
+            return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis, simulationResult);
+          }
+
           await writeAuditLog({
             transaction_id: transaction.id,
             actor,
@@ -281,8 +357,15 @@ export async function processSingleTransaction(
             attempt_number: nextAttempt
           });
         } else {
+          // ISSUE 2: Schedule retry with next_retry_at timestamp (15 minutes in future)
           finalStatus = 'retry_scheduled';
-          await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
+          const futureRetryTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+          const dbSuccess = await updateTransactionInDb(transaction.id, finalStatus, nextAttempt, futureRetryTime);
+          if (!dbSuccess) {
+            return handlePersistenceError(transaction, initialStatus, safety, policy, aiDiagnosis, simulationResult);
+          }
+
           await writeAuditLog({
             transaction_id: transaction.id,
             actor,
@@ -290,7 +373,7 @@ export async function processSingleTransaction(
             root_cause: aiDiagnosis.root_cause,
             ai_confidence: aiDiagnosis.confidence,
             action_taken: 'retry_scheduled',
-            decision_reason: `Simulated retry failed on attempt ${nextAttempt}/${transaction.max_attempts}. Scheduled for next retry window.`,
+            decision_reason: `Simulated retry failed on attempt ${nextAttempt}/${transaction.max_attempts}. Scheduled next retry window for ${new Date(futureRetryTime).toLocaleTimeString()}.`,
             reasoning: aiDiagnosis.reasoning,
             message_draft: aiDiagnosis.message,
             attempt_number: nextAttempt
@@ -312,5 +395,46 @@ export async function processSingleTransaction(
     policyResult: policy,
     simulationResult,
     decisionReason: `[${aiDiagnosis.provider}] Category: ${aiDiagnosis.category} (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). ${policy.reason}`
+  };
+}
+
+/**
+ * Handles database persistence failure cleanly to ensure Recovery Engine never claims uncommitted recovery states.
+ */
+async function handlePersistenceError(
+  transaction: Transaction,
+  initialStatus: TransactionStatus,
+  safety: any,
+  policy: any,
+  aiDiagnosis: AIDiagnosisResult,
+  simulationResult?: any
+): Promise<RecoveryEngineResult> {
+  const actor = aiDiagnosis.isFallback ? 'system_rule' : 'ai_agent';
+
+  await writeAuditLog({
+    transaction_id: transaction.id,
+    actor,
+    event_type: 'persistence_failed',
+    root_cause: aiDiagnosis.root_cause,
+    ai_confidence: aiDiagnosis.confidence,
+    action_taken: policy.action,
+    decision_reason: `Database persistence failed while committing action '${policy.action}'. Status reverted to '${initialStatus}'.`,
+    reasoning: aiDiagnosis.reasoning,
+    attempt_number: transaction.attempts
+  });
+
+  return {
+    transactionId: transaction.id,
+    razorpayPaymentId: transaction.razorpay_payment_id,
+    previousStatus: initialStatus,
+    newStatus: initialStatus, // Preserve previous status
+    category: aiDiagnosis.category,
+    actionTaken: policy.action,
+    safetyResult: safety,
+    policyResult: policy,
+    simulationResult,
+    decisionReason: `Database persistence failed while committing action '${policy.action}'. Recovery state remains uncommitted.`,
+    error: 'PERSISTENCE_FAILED: Failed to commit status update to database.',
+    persistenceError: true
   };
 }

@@ -12,14 +12,14 @@ export const HeroMetricsBanner: React.FC<HeroMetricsBannerProps> = ({ metrics })
     <div className="space-y-6 mb-8">
       {/* 4 Money-First Primary Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Revenue At Risk */}
+        {/* Card 1: Total Failed Exposure */}
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-xl relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-mono uppercase tracking-wider mb-2">
-            <span>Revenue At Risk</span>
+            <span>Total Failed Exposure</span>
             <AlertTriangle className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono tracking-tight">
-            {formatPaiseToRupees(metrics.totalAtRiskPaise)}
+            {formatPaiseToRupees(metrics.totalFailedExposurePaise || metrics.totalAtRiskPaise)}
           </div>
           <div className="text-xs text-slate-400 font-mono mt-1 flex items-center justify-between">
             <span>{metrics.totalTransactions} Total Failures</span>
@@ -54,18 +54,18 @@ export const HeroMetricsBanner: React.FC<HeroMetricsBannerProps> = ({ metrics })
             {metrics.recoveryRate}%
           </div>
           <div className="text-xs text-slate-400 font-mono mt-1">
-            Conversion ratio across all risk cases
+            Conversion ratio across all failed exposure
           </div>
         </div>
 
-        {/* Card 4: Remaining At Risk */}
+        {/* Card 4: Currently At Risk */}
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-xl relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-mono uppercase tracking-wider mb-2">
-            <span>Remaining Risk</span>
+            <span>Currently At Risk</span>
             <Wallet className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold text-slate-200 font-mono tracking-tight">
-            {formatPaiseToRupees(metrics.remainingAtRiskPaise)}
+            {formatPaiseToRupees(metrics.currentlyAtRiskPaise || metrics.remainingAtRiskPaise)}
           </div>
           <div className="text-xs text-slate-400 font-mono mt-1 flex items-center justify-between">
             <span>{metrics.activeP2PCount} P2P</span>
@@ -86,10 +86,10 @@ export const HeroMetricsBanner: React.FC<HeroMetricsBannerProps> = ({ metrics })
           {/* Before */}
           <div className="text-center md:text-left flex-1">
             <div className="text-[11px] font-mono uppercase text-slate-400 mb-1">
-              Before PayRescue
+              Before PayRescue (Total Exposure)
             </div>
             <div className="text-xl font-bold text-slate-300 font-mono line-through decoration-rose-500/60 decoration-2">
-              {formatPaiseToRupees(metrics.totalAtRiskPaise)}
+              {formatPaiseToRupees(metrics.totalFailedExposurePaise || metrics.totalAtRiskPaise)}
             </div>
             <div className="text-[10px] text-rose-400 font-mono mt-0.5">
               100% Unrecovered Revenue Leakage
