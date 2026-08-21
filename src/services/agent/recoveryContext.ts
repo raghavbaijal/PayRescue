@@ -1,12 +1,15 @@
 import type { Transaction } from '../../types';
-import type { RecoveryContext } from './agentTypes';
+import type { RecoveryContext, RecoveryMemory } from './agentTypes';
 
 /**
  * Deterministic, pure, side-effect-free builder for RecoveryContext.
  * Extracts payment failure metadata, attempt counters, and recovery status
  * without mutating the transaction object or interacting with the database.
  */
-export function buildRecoveryContext(transaction: Transaction): RecoveryContext {
+export function buildRecoveryContext(
+  transaction: Transaction,
+  memory?: RecoveryMemory
+): RecoveryContext {
   if (!transaction) {
     throw new Error('[buildRecoveryContext]: Valid transaction object required.');
   }
@@ -31,6 +34,21 @@ export function buildRecoveryContext(transaction: Transaction): RecoveryContext 
       reason: transaction.error_reason,
       source: transaction.error_source,
       code: transaction.error_code
-    }
+    },
+
+    memory
+  };
+}
+
+/**
+ * Pure enrichment function to attach RecoveryMemory to an existing RecoveryContext.
+ */
+export function enrichRecoveryContextWithMemory(
+  context: RecoveryContext,
+  memory: RecoveryMemory
+): RecoveryContext {
+  return {
+    ...context,
+    memory
   };
 }

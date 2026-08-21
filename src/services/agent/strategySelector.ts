@@ -1,20 +1,22 @@
 import type { SafetyResult, PolicyResult } from '../../types/recovery';
 import type { AIDiagnosisResult } from '../ai/aiTypes';
-import type { RecoveryContext, RecoveryStrategy, AgentStrategySummary } from './agentTypes';
+import type { RecoveryContext, RecoveryStrategy, AgentStrategySummary, RecoveryMemory } from './agentTypes';
 
 /**
- * Selects recommended recovery strategy based on diagnosis and context,
- * and enforces authoritative Safety Gate and Policy Engine override rules.
+ * Selects recommended recovery strategy based on AI diagnosis, failure context, and historical memory.
+ * Enforces authoritative Safety Gate and Policy Engine override rules.
  * 
  * Safety & Policy Engine Authority Rule:
- * The Strategy Selector recommends a strategy, but deterministic Policy Engine
- * and Safety Gate results ALWAYS retain final execution authority.
+ * Historical memory is ADVISORY INTELLIGENCE ONLY.
+ * The Strategy Selector recommends a strategy informed by diagnosis and memory,
+ * but deterministic Policy Engine and Safety Gate results ALWAYS retain final execution authority.
  */
 export function selectRecoveryStrategy(
   context: RecoveryContext,
   safetyResult: SafetyResult,
   aiDiagnosis?: AIDiagnosisResult | null,
-  policyResult?: PolicyResult | null
+  policyResult?: PolicyResult | null,
+  memory?: RecoveryMemory
 ): AgentStrategySummary {
   const category = aiDiagnosis?.category || 'unknown';
   const isDue = !context.transaction.next_retry_at || new Date(context.transaction.next_retry_at).getTime() <= Date.now();
@@ -43,7 +45,21 @@ export function selectRecoveryStrategy(
       break;
   }
 
-  // 2. Enforce Deterministic Safety Gate & Policy Engine Authority (POLICY & SAFETY MUST WIN!)
+  // 2. Advisory Historical Memory Signal Integration (Advisory Only!)
+  let memoryReasoningHint = '';
+  if (memory && memory.confidence >= 0.50 && memory.sampleSize >= 5) {
+    const retryLaterStats = memory.outcomesByAction['retry_later'];
+    const retryNowStats = memory.outcomesByAction['retry_now'];
+
+    if ((category === 'retryable' || category === 'authentication_failure') && retryLaterStats && retryNowStats) {
+      if (retryLaterStats.attempts >= 2 && retryLaterStats.recoveryRate > retryNowStats.recoveryRate + 10) {
+        recommended = 'retry_later';
+        memoryReasoningHint = ` [Memory Intelligence]: Advisory signal favors 'retry_later' (${retryLaterStats.recoveryRate}% historical success vs ${retryNowStats.recoveryRate}% for retry_now across ${memory.sampleSize} similar cases).`;
+      }
+    }
+  }
+
+  // 3. Enforce Deterministic Safety Gate & Policy Engine Authority (POLICY & SAFETY MUST WIN!)
   let finalStrategy: RecoveryStrategy = recommended;
   let authoritySource = 'AI Diagnosis Recommendation';
 
@@ -60,7 +76,7 @@ export function selectRecoveryStrategy(
     authoritySource = 'Deterministic Policy Engine';
     switch (policyResult.action) {
       case 'retry_scheduled':
-        finalStrategy = isDue ? 'retry_now' : 'retry_later';
+        finalStrategy = (recommended === 'retry_later' || !isDue) ? 'retry_later' : 'retry_now';
         break;
 
       case 'promise_to_pay':
@@ -81,11 +97,11 @@ export function selectRecoveryStrategy(
     }
   }
 
-  // 3. Construct Reasoning
-  let reasoning = `Strategy selector recommended '${recommended}', aligned with ${authoritySource} final strategy '${finalStrategy}'.`;
+  // 4. Construct Reasoning Narrative
+  let reasoning = `Strategy selector recommended '${recommended}'${memoryReasoningHint}, aligned with ${authoritySource} final strategy '${finalStrategy}'.`;
 
   if (recommended !== finalStrategy) {
-    reasoning = `Strategy selector recommended '${recommended}' based on AI diagnosis, but ${authoritySource} enforced final strategy '${finalStrategy}' (${safetyResult.decision !== 'eligible' ? safetyResult.reason : policyResult?.reason || 'Policy boundary enforced'}).`;
+    reasoning = `Strategy selector recommended '${recommended}' based on diagnosis/memory intelligence, but ${authoritySource} enforced final strategy '${finalStrategy}' (${safetyResult.decision !== 'eligible' ? safetyResult.reason : policyResult?.reason || 'Policy boundary enforced'}).`;
   }
 
   return {

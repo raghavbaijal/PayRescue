@@ -40,6 +40,34 @@ export interface AgentStrategySummary {
   reasoning: string;
 }
 
+export interface ActionOutcomeStats {
+  attempts: number;
+  recovered: number;
+  recoveryRate: number;
+  amountRecoveredPaise: number;
+}
+
+export interface CategoryOutcomeStats {
+  cases: number;
+  recovered: number;
+  recoveryRate: number;
+}
+
+export interface RecoveryMemory {
+  sampleSize: number;
+  historicalCases: number;
+  recoveredCases: number;
+  recoveryRate: number; // 0 - 100 percentage
+  totalAttemptedAmountPaise: number;
+  totalRecoveredAmountPaise: number;
+  averageAttemptsToRecovery: number | null;
+  outcomesByAction: Record<string, ActionOutcomeStats>;
+  outcomesByFailureCategory: Record<string, CategoryOutcomeStats>;
+  matchingLevel: 'exact_reason' | 'failure_category' | 'broad_history';
+  similarCaseSummary: string;
+  confidence: number; // 0.0 - 1.0 (sample size based deterministic score)
+}
+
 export interface RecoveryContext {
   transaction: Transaction;
 
@@ -61,6 +89,8 @@ export interface RecoveryContext {
     source?: ErrorSource | string;
     code?: string;
   };
+
+  memory?: RecoveryMemory;
 }
 
 export interface AgentDiagnosisSummary {
@@ -83,6 +113,13 @@ export interface AgentDecision {
   strategy?: AgentStrategySummary;
   policy?: PolicyResult;
   recommendedAction?: RecoveryAction;
+  memory?: {
+    sampleSize: number;
+    recoveryRate: number;
+    confidence: number;
+    summary: string;
+    matchingLevel: string;
+  };
   reasoning: string;
   createdAt: string;
 }

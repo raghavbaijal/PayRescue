@@ -1,8 +1,9 @@
 import type { Transaction, TransactionStatus } from '../../types';
 import type { AgentDecision, AgentExecutionResult, ActionExecutionResult } from './agentTypes';
-import { buildRecoveryContext } from './recoveryContext';
+import { buildRecoveryContext, enrichRecoveryContextWithMemory } from './recoveryContext';
 import { calculateRecoveryPriority } from './recoveryPrioritizer';
 import { selectRecoveryStrategy } from './strategySelector';
+import { getRecoveryMemorySync } from './recoveryMemory';
 import { executeRecoveryAction } from './actionExecutor';
 import { evaluateRecoveryOutcome } from './outcomeEvaluator';
 import { evaluateSafety } from '../safetyGate';
@@ -12,29 +13,44 @@ import { aiService, isConfidenceAboveThreshold } from '../ai/aiService';
 import type { AIDiagnosisResult } from '../ai/aiTypes';
 
 /**
- * Closed-Loop Recovery Agent Decision Orchestrator (Phase 5.1 & 5.2).
+ * Closed-Loop Recovery Agent Decision Orchestrator (Phase 5.1, 5.2 & 5.4 Memory Intelligence).
  * 
  * Side-Effect Free Decision Layer:
- * Context ➔ Priority ➔ Safety Gate ➔ AI Diagnosis ➔ AI Confidence Gate ➔ Strategy Selection ➔ Policy Engine ➔ Agent Decision
+ * Context ➔ Memory ➔ Priority ➔ Safety Gate ➔ AI Diagnosis ➔ AI Confidence Gate ➔ Strategy Selection ➔ Policy Engine ➔ Agent Decision
  * 
  * Does NOT execute payment retries or mutate database records.
  */
-export async function runRecoveryAgent(transaction: Transaction): Promise<AgentDecision> {
+export async function runRecoveryAgent(
+  transaction: Transaction,
+  historicalDataset?: Transaction[]
+): Promise<AgentDecision> {
   const createdAt = new Date().toISOString();
 
-  // 1. Build Recovery Context (Pure, side-effect free)
-  const context = buildRecoveryContext(transaction);
+  // 1. Build Initial Recovery Context
+  let context = buildRecoveryContext(transaction);
 
-  // 2. Calculate Recovery Priority Score & Factors
+  // 2. Load Historical Recovery Memory (Pure, deterministic, read-only aggregation)
+  const memory = getRecoveryMemorySync(transaction, historicalDataset);
+  context = enrichRecoveryContextWithMemory(context, memory);
+
+  // 3. Calculate Recovery Priority Score & Factors
   const priority = calculateRecoveryPriority(context);
 
-  // 3. Evaluate Safety Gate prior to AI diagnosis
+  const memorySummary = {
+    sampleSize: memory.sampleSize,
+    recoveryRate: memory.recoveryRate,
+    confidence: memory.confidence,
+    summary: memory.similarCaseSummary,
+    matchingLevel: memory.matchingLevel
+  };
+
+  // 4. Evaluate Safety Gate prior to AI diagnosis
   const safety = evaluateSafety(transaction);
   if (safety.decision !== 'eligible') {
     const isEscalated = safety.decision === 'escalated' || safety.actionIfBlocked === 'escalated';
     const status = isEscalated ? 'escalated' : 'blocked';
     const action = safety.actionIfBlocked || (isEscalated ? 'escalated' : 'stopped');
-    const strategy = selectRecoveryStrategy(context, safety, null, null);
+    const strategy = selectRecoveryStrategy(context, safety, null, null, memory);
 
     return {
       transactionId: transaction.id,
@@ -45,12 +61,13 @@ export async function runRecoveryAgent(transaction: Transaction): Promise<AgentD
       safety,
       strategy,
       recommendedAction: action,
+      memory: memorySummary,
       reasoning: `[Safety Boundary Enforced]: Priority Score ${priority.score} (${priority.level.toUpperCase()}). Safety Gate ${safety.decision.toUpperCase()}: ${safety.reason}`,
       createdAt
     };
   }
 
-  // 4. Request AI Diagnosis Layer (Groq GPT-OSS 120B / Fallback)
+  // 5. Request AI Diagnosis Layer (Groq GPT-OSS 120B / Fallback)
   let aiDiagnosis: AIDiagnosisResult;
   try {
     aiDiagnosis = await aiService.diagnoseTransaction(transaction);
@@ -76,11 +93,11 @@ export async function runRecoveryAgent(transaction: Transaction): Promise<AgentD
     isFallback: aiDiagnosis.isFallback
   };
 
-  // 5. Evaluate AI Confidence Gate (Threshold = 0.80)
+  // 6. Evaluate AI Confidence Gate (Threshold = 0.80)
   if (!isConfidenceAboveThreshold(aiDiagnosis.confidence)) {
     const confidencePct = (aiDiagnosis.confidence * 100).toFixed(0);
     const reasoning = `AI confidence score below 80% threshold (${confidencePct}% < 80%). Automated recovery blocked; escalated to operations.`;
-    const strategy = selectRecoveryStrategy(context, safety, aiDiagnosis, null);
+    const strategy = selectRecoveryStrategy(context, safety, aiDiagnosis, null, memory);
 
     return {
       transactionId: transaction.id,
@@ -92,16 +109,17 @@ export async function runRecoveryAgent(transaction: Transaction): Promise<AgentD
       safety,
       strategy,
       recommendedAction: 'escalated',
+      memory: memorySummary,
       reasoning,
       createdAt
     };
   }
 
-  // 6. Evaluate Deterministic Policy Engine for Permitted Action Authority
+  // 7. Evaluate Deterministic Policy Engine for Permitted Action Authority
   const policy = evaluatePolicy(transaction);
 
-  // 7. Select Recovery Strategy & Enforce Policy Authority
-  const strategy = selectRecoveryStrategy(context, safety, aiDiagnosis, policy);
+  // 8. Select Recovery Strategy & Enforce Policy Authority (incorporates Memory Intelligence)
+  const strategy = selectRecoveryStrategy(context, safety, aiDiagnosis, policy, memory);
 
   return {
     transactionId: transaction.id,
@@ -114,6 +132,7 @@ export async function runRecoveryAgent(transaction: Transaction): Promise<AgentD
     policy,
     strategy,
     recommendedAction: policy.action,
+    memory: memorySummary,
     reasoning: `[Agent Orchestrator]: Priority ${priority.level.toUpperCase()} (${priority.score}/100). AI diagnosed '${aiDiagnosis.category}' (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). Policy Engine authorized '${policy.action}'. ${strategy.reasoning}`,
     createdAt
   };
