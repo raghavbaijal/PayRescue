@@ -5,6 +5,8 @@ import { evaluatePolicy } from './policyEngine';
 import { simulatePaymentExecution } from './paymentSimulator';
 import { writeAuditLog } from './auditService';
 import { createPromiseToPay } from './p2pService';
+import { aiService, isConfidenceAboveThreshold } from './ai/aiService';
+import type { AIDiagnosisResult } from './ai/aiTypes';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { DEMO_TRANSACTIONS } from '../data/demoData';
 
@@ -57,14 +59,15 @@ async function updateTransactionInDb(
 }
 
 /**
- * Orchestrates recovery lifecycle for a single payment failure transaction.
+ * Orchestrates Phase 3 AI-Assisted Recovery Lifecycle for a single payment failure:
+ * Initial Safety Gate ➔ AI Diagnosis ➔ AI Confidence Gate ➔ Policy Engine ➔ Payment Simulator ➔ Database Updates ➔ Audit Trail
  */
 export async function processSingleTransaction(
   transaction: Transaction
 ): Promise<RecoveryEngineResult> {
   const initialStatus = transaction.status;
 
-  // 1. Safety Gate Evaluation
+  // 1. Initial Safety Gate Evaluation (Optimization: skip AI call if already resolved / max attempts reached)
   const safety = evaluateSafety(transaction);
   if (safety.decision !== 'eligible') {
     let targetStatus: TransactionStatus = 'stopped';
@@ -87,7 +90,7 @@ export async function processSingleTransaction(
         root_cause: transaction.error_reason,
         action_taken: safety.actionIfBlocked || targetStatus,
         decision_reason: safety.reason,
-        reasoning: `Safety gate blocked execution. Decision: ${safety.decision}`,
+        reasoning: `Safety gate blocked execution prior to AI diagnosis. Decision: ${safety.decision}`,
         attempt_number: transaction.attempts
       });
     }
@@ -104,10 +107,63 @@ export async function processSingleTransaction(
     };
   }
 
-  // 2. Deterministic Policy Engine Evaluation
+  // 2. AI Diagnosis Layer (Groq GPT-OSS 120B / Deterministic Fallback)
+  let aiDiagnosis: AIDiagnosisResult;
+  try {
+    aiDiagnosis = await aiService.diagnoseTransaction(transaction);
+  } catch (err) {
+    console.warn(`[Recovery Engine AI Exception ${transaction.id}]:`, err);
+    // Safety fallback
+    aiDiagnosis = {
+      root_cause: transaction.error_reason,
+      category: 'unknown',
+      confidence: 0.50,
+      reasoning: 'AI diagnosis service encountered an unexpected error. Triggering safety fallback.',
+      message: 'Your payment could not be completed. Please contact customer support.',
+      provider: 'Deterministic Rule Fallback',
+      isFallback: true
+    };
+  }
+
+  const actor = aiDiagnosis.isFallback ? 'system_rule' : 'ai_agent';
+
+  // 3. AI Confidence Gate Evaluation (Threshold = 0.80)
+  if (!isConfidenceAboveThreshold(aiDiagnosis.confidence)) {
+    const escalatedStatus: TransactionStatus = 'escalated';
+    await updateTransactionInDb(transaction.id, escalatedStatus);
+
+    const confidencePct = (aiDiagnosis.confidence * 100).toFixed(0);
+    const decisionReason = `AI confidence score below 80% threshold (${confidencePct}% < 80%). Automatic recovery blocked; transaction escalated for manual ops review.`;
+
+    await writeAuditLog({
+      transaction_id: transaction.id,
+      actor,
+      event_type: 'escalated',
+      root_cause: aiDiagnosis.root_cause,
+      ai_confidence: aiDiagnosis.confidence,
+      action_taken: 'escalated',
+      decision_reason: decisionReason,
+      reasoning: aiDiagnosis.reasoning,
+      message_draft: aiDiagnosis.message,
+      attempt_number: transaction.attempts
+    });
+
+    return {
+      transactionId: transaction.id,
+      razorpayPaymentId: transaction.razorpay_payment_id,
+      previousStatus: initialStatus,
+      newStatus: escalatedStatus,
+      category: aiDiagnosis.category,
+      actionTaken: 'escalated',
+      safetyResult: safety,
+      decisionReason
+    };
+  }
+
+  // 4. Deterministic Policy Engine Evaluation
   const policy = evaluatePolicy(transaction);
 
-  // 3. Action Execution Branching
+  // 5. Action Execution Branching
   let finalStatus: TransactionStatus = 'pending';
   let simulationResult = undefined;
 
@@ -116,6 +172,19 @@ export async function processSingleTransaction(
       finalStatus = 'promise_to_pay';
       await updateTransactionInDb(transaction.id, finalStatus);
       await createPromiseToPay(transaction);
+
+      await writeAuditLog({
+        transaction_id: transaction.id,
+        actor,
+        event_type: 'promise_logged',
+        root_cause: aiDiagnosis.root_cause,
+        ai_confidence: aiDiagnosis.confidence,
+        action_taken: 'promise_to_pay',
+        decision_reason: `AI classified as ${aiDiagnosis.category} (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). ${policy.reason}`,
+        reasoning: aiDiagnosis.reasoning,
+        message_draft: aiDiagnosis.message,
+        attempt_number: transaction.attempts
+      });
       break;
     }
 
@@ -124,12 +193,14 @@ export async function processSingleTransaction(
       await updateTransactionInDb(transaction.id, finalStatus);
       await writeAuditLog({
         transaction_id: transaction.id,
-        actor: 'system_rule',
+        actor,
         event_type: 'stopped',
-        root_cause: transaction.error_reason,
+        root_cause: aiDiagnosis.root_cause,
+        ai_confidence: aiDiagnosis.confidence,
         action_taken: 'alternate_payment',
         decision_reason: policy.reason,
-        reasoning: 'Card expired or debit instrument blocked. Customer requires alternate payment setup.',
+        reasoning: aiDiagnosis.reasoning,
+        message_draft: aiDiagnosis.message,
         attempt_number: transaction.attempts
       });
       break;
@@ -140,12 +211,14 @@ export async function processSingleTransaction(
       await updateTransactionInDb(transaction.id, finalStatus);
       await writeAuditLog({
         transaction_id: transaction.id,
-        actor: 'system_rule',
+        actor,
         event_type: 'escalated',
-        root_cause: transaction.error_reason,
+        root_cause: aiDiagnosis.root_cause,
+        ai_confidence: aiDiagnosis.confidence,
         action_taken: 'escalated',
         decision_reason: policy.reason,
-        reasoning: 'Failure classified as unrecoverable by automated rule or risk trigger.',
+        reasoning: aiDiagnosis.reasoning,
+        message_draft: aiDiagnosis.message,
         attempt_number: transaction.attempts
       });
       break;
@@ -156,12 +229,14 @@ export async function processSingleTransaction(
       await updateTransactionInDb(transaction.id, finalStatus);
       await writeAuditLog({
         transaction_id: transaction.id,
-        actor: 'system_rule',
+        actor,
         event_type: 'stopped',
-        root_cause: transaction.error_reason,
+        root_cause: aiDiagnosis.root_cause,
+        ai_confidence: aiDiagnosis.confidence,
         action_taken: 'stopped',
         decision_reason: policy.reason,
-        reasoning: 'Maximum retry attempt bound reached.',
+        reasoning: aiDiagnosis.reasoning,
+        message_draft: aiDiagnosis.message,
         attempt_number: transaction.attempts
       });
       break;
@@ -169,7 +244,7 @@ export async function processSingleTransaction(
 
     case 'retry_scheduled':
     default: {
-      // Execute simulated retry payment
+      // Execute simulated payment retry
       simulationResult = simulatePaymentExecution(transaction, 'retry_scheduled');
       const nextAttempt = transaction.attempts + 1;
 
@@ -178,12 +253,14 @@ export async function processSingleTransaction(
         await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
         await writeAuditLog({
           transaction_id: transaction.id,
-          actor: 'system_rule',
+          actor,
           event_type: 'retry_executed',
-          root_cause: transaction.error_reason,
+          root_cause: aiDiagnosis.root_cause,
+          ai_confidence: aiDiagnosis.confidence,
           action_taken: 'recovered',
-          decision_reason: `${policy.reason} ${simulationResult.reason}`,
-          reasoning: 'Automated retry executed successfully. Payment captured.',
+          decision_reason: `AI Diagnosis: ${aiDiagnosis.root_cause} (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). ${simulationResult.reason}`,
+          reasoning: aiDiagnosis.reasoning,
+          message_draft: aiDiagnosis.message,
           attempt_number: nextAttempt
         });
       } else {
@@ -193,12 +270,14 @@ export async function processSingleTransaction(
           await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
           await writeAuditLog({
             transaction_id: transaction.id,
-            actor: 'system_rule',
+            actor,
             event_type: 'stopped',
-            root_cause: transaction.error_reason,
+            root_cause: aiDiagnosis.root_cause,
+            ai_confidence: aiDiagnosis.confidence,
             action_taken: 'stopped',
-            decision_reason: `Simulated retry failed on attempt ${nextAttempt} of ${transaction.max_attempts}. Threshold exhausted.`,
-            reasoning: simulationResult.reason,
+            decision_reason: `Simulated retry failed on attempt ${nextAttempt}/${transaction.max_attempts}. Attempt threshold exhausted.`,
+            reasoning: aiDiagnosis.reasoning,
+            message_draft: aiDiagnosis.message,
             attempt_number: nextAttempt
           });
         } else {
@@ -206,12 +285,14 @@ export async function processSingleTransaction(
           await updateTransactionInDb(transaction.id, finalStatus, nextAttempt);
           await writeAuditLog({
             transaction_id: transaction.id,
-            actor: 'system_rule',
+            actor,
             event_type: 'retry_executed',
-            root_cause: transaction.error_reason,
+            root_cause: aiDiagnosis.root_cause,
+            ai_confidence: aiDiagnosis.confidence,
             action_taken: 'retry_scheduled',
-            decision_reason: `Simulated retry failed on attempt ${nextAttempt} of ${transaction.max_attempts}. Scheduled for next retry window.`,
-            reasoning: simulationResult.reason,
+            decision_reason: `Simulated retry failed on attempt ${nextAttempt}/${transaction.max_attempts}. Scheduled for next retry window.`,
+            reasoning: aiDiagnosis.reasoning,
+            message_draft: aiDiagnosis.message,
             attempt_number: nextAttempt
           });
         }
@@ -225,11 +306,11 @@ export async function processSingleTransaction(
     razorpayPaymentId: transaction.razorpay_payment_id,
     previousStatus: initialStatus,
     newStatus: finalStatus,
-    category: policy.category,
+    category: aiDiagnosis.category,
     actionTaken: policy.action,
     safetyResult: safety,
     policyResult: policy,
     simulationResult,
-    decisionReason: `${policy.reason} Status updated from '${initialStatus}' to '${finalStatus}'.`
+    decisionReason: `[${aiDiagnosis.provider}] Category: ${aiDiagnosis.category} (${(aiDiagnosis.confidence * 100).toFixed(0)}% confidence). ${policy.reason}`
   };
 }
