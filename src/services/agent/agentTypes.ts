@@ -9,6 +9,37 @@ export type AgentDecisionStatus =
   | 'completed'
   | 'escalated';
 
+export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
+
+export interface PriorityFactors {
+  amountRisk: number;        // Normalized score (0 - 25)
+  failureSeverity: number;   // Severity score (0 - 25)
+  attemptPressure: number;   // Utilization pressure score (0 - 25)
+  urgency: number;           // Timing urgency score (0 - 25)
+  recoverability: number;    // Recoverability signal score (0 - 25)
+}
+
+export interface RecoveryPriority {
+  score: number;             // Bounded score 0 - 100
+  level: PriorityLevel;
+  factors: PriorityFactors;
+  reasoning: string;
+}
+
+export type RecoveryStrategy =
+  | 'retry_now'
+  | 'retry_later'
+  | 'promise_to_pay'
+  | 'alternate_payment'
+  | 'escalate'
+  | 'stop';
+
+export interface AgentStrategySummary {
+  recommended: RecoveryStrategy;
+  final: RecoveryStrategy;
+  reasoning: string;
+}
+
 export interface RecoveryContext {
   transaction: Transaction;
 
@@ -46,8 +77,10 @@ export interface AgentDecision {
   razorpayPaymentId: string;
   status: AgentDecisionStatus;
   context: RecoveryContext;
+  priority: RecoveryPriority;
   diagnosis?: AgentDiagnosisSummary;
   safety: SafetyResult;
+  strategy?: AgentStrategySummary;
   policy?: PolicyResult;
   recommendedAction?: RecoveryAction;
   reasoning: string;
