@@ -37,10 +37,10 @@ serve(async (req) => {
   }
 
   try {
-    const apiKey = Deno.env.get("GROQ_API_KEY") || Deno.env.get("VITE_GROQ_API_KEY");
+    const apiKey = Deno.env.get("GROQ_API_KEY");
     if (!apiKey) {
       return new Response(
-        JSON.stringify({ error: "GROQ_API_KEY environment variable not configured on server." }),
+        JSON.stringify({ error: "GROQ_API_KEY secret not configured in Supabase Edge Function environment." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
