@@ -169,3 +169,38 @@ export interface AgentExecutionResult {
   newTransactionStatus: TransactionStatus;
   completedAt: string;
 }
+
+export interface AgentStep {
+  step: number;
+  decision: AgentDecision;
+  execution?: ActionExecutionResult;
+  outcome?: RecoveryOutcome;
+  startedAt: string;
+  completedAt: string;
+}
+
+export type ClosedLoopStatus =
+  | 'recovered'
+  | 'scheduled'
+  | 'promise_created'
+  | 'escalated'
+  | 'stopped'
+  | 'blocked'
+  | 'max_steps_reached';
+
+export interface ClosedLoopOptions {
+  maxSteps?: number;
+  historicalDataset?: Transaction[];
+}
+
+export interface ClosedLoopResult {
+  transactionId: string;
+  status: ClosedLoopStatus;
+  steps: AgentStep[];
+  totalSteps: number;
+  totalRecoveredAmountPaise: number;
+  startedAt: string;
+  completedAt: string;
+  terminationReason: string;
+  finalTransactionState: Transaction;
+}
