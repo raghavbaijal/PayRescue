@@ -67,14 +67,26 @@ export interface BatchRecoverySummary {
   results: RecoveryEngineResult[];
 }
 
+export interface RecoveryFunnelMetrics {
+  failed: number;
+  diagnosed: number;
+  eligible: number;
+  intervention: number;
+  recovered: number;
+  escalated: number;
+  stopped: number;
+}
+
 export interface RecoveryMetrics {
   totalTransactions: number;
   totalAtRiskPaise: number;
   totalRecoveredPaise: number;
+  remainingAtRiskPaise: number;
   recoveryRate: number; // percentage (0 - 100)
   recoveredCount: number;
   escalatedCount: number;
   stoppedCount: number;
   activeP2PCount: number;
   pendingCount: number;
+  funnel: RecoveryFunnelMetrics;
 }

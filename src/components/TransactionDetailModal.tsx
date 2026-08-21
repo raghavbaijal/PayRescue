@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import type { Transaction, AuditLog } from '../types';
 import { formatPaiseToRupees, formatDate, getStatusBadgeStyle, getMethodBadge } from '../utils/formatters';
 import { fetchAuditLogsForTransaction } from '../services/auditService';
+import { evaluateSafety } from '../services/safetyGate';
+import { evaluatePolicy } from '../services/policyEngine';
 import { aiService } from '../services/ai/aiService';
 import type { AIDiagnosisResult } from '../services/ai/aiTypes';
-import { X, Bot, Shield, RefreshCw, MessageSquare, Terminal } from 'lucide-react';
+import { X, Bot, Shield, RefreshCw, MessageSquare, Terminal, Calendar, ShieldCheck, Zap } from 'lucide-react';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -48,9 +50,17 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   if (!transaction) return null;
 
   const badge = getStatusBadgeStyle(transaction.status);
+  const safety = evaluateSafety(transaction);
+  const policy = evaluatePolicy(transaction);
+  const isP2P = transaction.status === 'promise_to_pay';
+
+  // Demo promised date for P2P view
+  const promisedDate = new Date();
+  promisedDate.setDate(promisedDate.getDate() + 2);
+  const promisedDateStr = promisedDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
         {/* Header */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950">
@@ -75,7 +85,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -83,7 +93,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6">
-          {/* Metadata Grid */}
+          {/* SECTION 1: TRANSACTION METADATA */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono">
             <div>
               <div className="text-slate-500 uppercase text-[10px]">Customer</div>
@@ -109,8 +119,8 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
             </div>
           </div>
 
-          {/* AI DIAGNOSIS SECTION */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 shadow-lg relative overflow-hidden">
+          {/* SECTION 2: AI DIAGNOSIS (Groq · GPT-OSS 120B) */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-5 shadow-lg relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-slate-900 pb-3">
               <div className="flex items-center space-x-2">
                 <Bot className="w-4 h-4 text-orange-500" />
@@ -141,10 +151,17 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
                     <div className="text-orange-400 font-bold uppercase mt-0.5">{aiDiagnosis.category}</div>
                   </div>
 
+                  {/* Confidence Bar */}
                   <div className="bg-slate-900/90 p-3 rounded-lg border border-slate-800">
-                    <div className="text-[10px] text-slate-500 uppercase">Confidence Score</div>
-                    <div className="text-emerald-400 font-bold mt-0.5 font-mono">
-                      {(aiDiagnosis.confidence * 100).toFixed(0)}%
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase mb-1">
+                      <span>Confidence Score</span>
+                      <span className="text-emerald-400 font-bold">{(aiDiagnosis.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className="bg-emerald-500 h-full rounded-full"
+                        style={{ width: `${(aiDiagnosis.confidence * 100).toFixed(0)}%` }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -169,17 +186,84 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
             ) : null}
           </div>
 
-          {/* AUDIT LOG TIMELINE */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5">
+          {/* SECTION 3: SAFETY GATE & DETERMINISTIC POLICY DECISION */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-5 shadow-lg space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <div className="flex items-center space-x-2">
+                <ShieldCheck className="w-4 h-4 text-blue-400" />
+                <span className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                  Deterministic Safety Gate & Policy Engine
+                </span>
+              </div>
+              <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded uppercase font-bold">
+                Deterministic Authority
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Safety Gate Outcome */}
+              <div className="bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 space-y-1">
+                <div className="text-[10px] text-slate-500 uppercase flex items-center justify-between">
+                  <span>Safety Gate Status</span>
+                  {safety.decision === 'eligible' ? (
+                    <span className="text-emerald-400 font-bold">PASSED</span>
+                  ) : (
+                    <span className="text-rose-400 font-bold">BLOCKED</span>
+                  )}
+                </div>
+                <div className="text-slate-200 font-bold uppercase">{safety.decision}</div>
+                <p className="text-[11px] text-slate-400 font-sans mt-1">{safety.reason}</p>
+              </div>
+
+              {/* Policy Decision Outcome */}
+              <div className="bg-slate-900/90 p-3.5 rounded-lg border border-slate-800 space-y-1">
+                <div className="text-[10px] text-slate-500 uppercase flex items-center justify-between">
+                  <span>Policy Engine Action</span>
+                  <span className="text-orange-400 font-bold">{policy.action}</span>
+                </div>
+                <div className="text-slate-200 font-bold uppercase">{policy.action.replace(/_/g, ' ')}</div>
+                <p className="text-[11px] text-slate-400 font-sans mt-1">{policy.reason}</p>
+              </div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/40 rounded border border-slate-800 text-[11px] text-slate-400 flex items-center space-x-2">
+              <Zap className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+              <span>
+                <strong>Safety Precedence:</strong> AI cannot override Safety Gate bounds or maximum attempt thresholds ({transaction.attempts}/{transaction.max_attempts}).
+              </span>
+            </div>
+          </div>
+
+          {/* SECTION 4: PROMISE-TO-PAY LIFECYCLE (IF APPLICABLE) */}
+          {isP2P && (
+            <div className="bg-slate-950/90 border border-amber-900/60 rounded-xl p-4 font-mono text-xs space-y-2">
+              <div className="flex items-center justify-between text-amber-400 font-bold">
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-4 h-4" />
+                  <span>Promise-to-Pay Commitment Active</span>
+                </div>
+                <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded text-[10px]">
+                  STATUS: ACTIVE
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-1 text-slate-300">
+                <div>Promised Deferred Date: <strong className="text-white">{promisedDateStr}</strong></div>
+                <div>Lifecycle: <strong className="text-emerald-400">DEFERRED (2 days window)</strong></div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 5: POSTGRESQL AUDIT TRAIL (APPEND-ONLY) */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4 border-b border-slate-900 pb-3">
               <div className="flex items-center space-x-2">
                 <Shield className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider">
-                  PostgreSQL Audit Log Trail (Append-Only)
+                  PostgreSQL Audit Trail (Append-Only)
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-slate-500">
-                {auditLogs.length} events recorded
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 border border-emerald-800 px-2 py-0.5 rounded font-bold">
+                ● APPEND-ONLY
               </span>
             </div>
 

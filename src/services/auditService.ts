@@ -85,3 +85,84 @@ export async function fetchAuditLogsForTransaction(transactionId: string): Promi
     return [];
   }
 }
+
+export async function fetchRecentActivityFeed(limit = 10): Promise<AuditLog[]> {
+  if (!isSupabaseConfigured()) {
+    return [
+      {
+        id: 101,
+        transaction_id: '11111111-1111-4111-a111-111111111108',
+        actor: 'system_rule',
+        event_type: 'retry_executed',
+        root_cause: 'gateway_technical_error',
+        ai_confidence: 0.98,
+        action_taken: 'recovered',
+        decision_reason: 'Automated retry executed successfully. ₹18,000 recovered.',
+        reasoning: 'Transient gateway error cleared.',
+        message_draft: null,
+        attempt_number: 2,
+        created_at: new Date(Date.now() - 5 * 60000).toISOString()
+      },
+      {
+        id: 102,
+        transaction_id: '11111111-1111-4111-a111-111111111102',
+        actor: 'system_rule',
+        event_type: 'retry_executed',
+        root_cause: 'bank_technical_error',
+        ai_confidence: 0.92,
+        action_taken: 'retry_scheduled',
+        decision_reason: 'Bank technical error detected; retry scheduled for attempt 2/3.',
+        reasoning: 'Bank uptime metrics indicate transient recovery.',
+        message_draft: null,
+        attempt_number: 2,
+        created_at: new Date(Date.now() - 15 * 60000).toISOString()
+      },
+      {
+        id: 103,
+        transaction_id: '11111111-1111-4111-a111-111111111107',
+        actor: 'human',
+        event_type: 'promise_logged',
+        root_cause: 'insufficient_funds',
+        ai_confidence: null,
+        action_taken: 'promise_to_pay',
+        decision_reason: 'Promise-to-Pay deferred window created for 48h.',
+        reasoning: 'Customer agreed to complete payment on payday.',
+        message_draft: 'Deferred payment link sent.',
+        attempt_number: 1,
+        created_at: new Date(Date.now() - 45 * 60000).toISOString()
+      },
+      {
+        id: 104,
+        transaction_id: '11111111-1111-4111-a111-111111111106',
+        actor: 'system_rule',
+        event_type: 'escalated',
+        root_cause: 'payment_risk_check_failed',
+        ai_confidence: null,
+        action_taken: 'escalated',
+        decision_reason: 'Risk check failure detected. Automated retry blocked; escalated to ops.',
+        reasoning: 'High-value transaction risk trigger.',
+        message_draft: null,
+        attempt_number: 1,
+        created_at: new Date(Date.now() - 2 * 3600000).toISOString()
+      }
+    ];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[Recent Activity Fetch Error]:', error.message);
+      return [];
+    }
+
+    return (data as AuditLog[]) || [];
+  } catch (err) {
+    console.error('[Recent Activity Exception]:', err);
+    return [];
+  }
+}
