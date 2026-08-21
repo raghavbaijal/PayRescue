@@ -13,7 +13,7 @@ export type TransactionStatus =
 
 export type PaymentMethod = 'card' | 'upi' | 'netbanking' | 'wallet';
 
-export type ErrorSource = 'bank' | 'gateway' | 'customer';
+export type ErrorSource = 'bank' | 'gateway' | 'customer' | 'risk';
 
 export type AuditActor = 'ai_agent' | 'system_rule' | 'human';
 

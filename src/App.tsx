@@ -1,11 +1,15 @@
 import { useTransactions } from './hooks/useTransactions';
 import { Header } from './components/Header';
 import { StatusBanner } from './components/StatusBanner';
+import { MetricsCards } from './components/MetricsCards';
+import { RecoveryControlPanel } from './components/RecoveryControlPanel';
 import { TransactionTable } from './components/TransactionTable';
 import { SchemaOverview } from './components/SchemaOverview';
+import { calculateRecoveryMetrics } from './services/metricsService';
 
 export function App() {
-  const { transactions, totalCount, loading, isLive, error, refetch } = useTransactions(50, 0);
+  const { transactions, totalCount, loading, isLive, error, refetch } = useTransactions(100, 0);
+  const metrics = calculateRecoveryMetrics(transactions);
 
   return (
     <div className="min-h-screen bg-[#0B0F17] text-slate-100 selection:bg-orange-500/30 selection:text-orange-200">
@@ -16,6 +20,12 @@ export function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Status Banner */}
         <StatusBanner isLive={isLive} totalCount={totalCount} />
+
+        {/* Phase 2 Metrics Cards */}
+        <MetricsCards metrics={metrics} />
+
+        {/* Phase 2 Recovery Engine Control Panel */}
+        <RecoveryControlPanel onBatchComplete={refetch} pendingCount={metrics.pendingCount} />
 
         {/* Transaction Table */}
         <TransactionTable
@@ -38,7 +48,7 @@ export function App() {
             <span className="text-slate-400 font-bold">PAYRESCUE</span> — AI-Powered Checkout Revenue Recovery
           </div>
           <div>
-            Phase 1 Foundation • PostgreSQL Schema v1.0 • Supabase Integrated
+            Phase 2 Recovery Engine Active • Deterministic Safety Gate & Policy Engine
           </div>
         </div>
       </footer>
