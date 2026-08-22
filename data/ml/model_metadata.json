@@ -1,0 +1,460 @@
+{
+  "model_version": "1.0.0",
+  "dataset_version": "1.0.0",
+  "feature_schema_version": "1.0.0",
+  "model_type": "random_forest",
+  "training_seed": 42,
+  "training_rows": 7000,
+  "validation_rows": 1500,
+  "test_rows": 1500,
+  "feature_count": 24,
+  "target": "eventual_recovery",
+  "train_date_range": {
+    "start": "2026-08-13T00:00:00.000Z",
+    "end": "2026-08-17T23:00:00.000Z"
+  },
+  "validation_date_range": {
+    "start": "2026-08-17T23:00:00.000Z",
+    "end": "2026-08-18T23:00:00.000Z"
+  },
+  "test_date_range": {
+    "start": "2026-08-18T23:00:00.000Z",
+    "end": "2026-08-19T23:00:00.000Z"
+  },
+  "logistic_regression_metrics": {
+    "roc_auc": 0.9354,
+    "pr_auc": 0.8378,
+    "brier_score": 0.0783,
+    "accuracy": 0.896,
+    "precision": 0.7945,
+    "recall": 1,
+    "f1": 0.8855,
+    "threshold_metrics": [
+      {
+        "threshold": 0.2,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.3,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.4,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.5,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.6,
+        "precision": 0.8369,
+        "recall": 0.8425,
+        "f1": 0.8397,
+        "tp": 508,
+        "fp": 99,
+        "tn": 798,
+        "fn": 95
+      },
+      {
+        "threshold": 0.7,
+        "precision": 0.8569,
+        "recall": 0.7844,
+        "f1": 0.819,
+        "tp": 473,
+        "fp": 79,
+        "tn": 818,
+        "fn": 130
+      },
+      {
+        "threshold": 0.8,
+        "precision": 0.8569,
+        "recall": 0.7844,
+        "f1": 0.819,
+        "tp": 473,
+        "fp": 79,
+        "tn": 818,
+        "fn": 130
+      }
+    ],
+    "confusion_matrix": {
+      "tp": 603,
+      "fp": 156,
+      "tn": 741,
+      "fn": 0
+    }
+  },
+  "random_forest_metrics": {
+    "roc_auc": 0.944,
+    "pr_auc": 0.8839,
+    "brier_score": 0.079,
+    "accuracy": 0.896,
+    "precision": 0.7945,
+    "recall": 1,
+    "f1": 0.8855,
+    "threshold_metrics": [
+      {
+        "threshold": 0.2,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.3,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.4,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.5,
+        "precision": 0.7945,
+        "recall": 1,
+        "f1": 0.8855,
+        "tp": 603,
+        "fp": 156,
+        "tn": 741,
+        "fn": 0
+      },
+      {
+        "threshold": 0.6,
+        "precision": 0.8538,
+        "recall": 0.7944,
+        "f1": 0.823,
+        "tp": 479,
+        "fp": 82,
+        "tn": 815,
+        "fn": 124
+      },
+      {
+        "threshold": 0.7,
+        "precision": 0.8559,
+        "recall": 0.7877,
+        "f1": 0.8204,
+        "tp": 475,
+        "fp": 80,
+        "tn": 817,
+        "fn": 128
+      },
+      {
+        "threshold": 0.8,
+        "precision": 0.8734,
+        "recall": 0.675,
+        "f1": 0.7615,
+        "tp": 407,
+        "fp": 59,
+        "tn": 838,
+        "fn": 196
+      }
+    ],
+    "confusion_matrix": {
+      "tp": 603,
+      "fp": 156,
+      "tn": 741,
+      "fn": 0
+    }
+  },
+  "selected_best_model": "random_forest",
+  "selected_model_test_metrics": {
+    "roc_auc": 0.9443,
+    "pr_auc": 0.8807,
+    "brier_score": 0.1426,
+    "accuracy": 0.892,
+    "precision": 0.82,
+    "recall": 0.937,
+    "f1": 0.8746,
+    "threshold_metrics": [
+      {
+        "threshold": 0.2,
+        "precision": 0.402,
+        "recall": 1,
+        "f1": 0.5735,
+        "tp": 603,
+        "fp": 897,
+        "tn": 0,
+        "fn": 0
+      },
+      {
+        "threshold": 0.3,
+        "precision": 0.4805,
+        "recall": 1,
+        "f1": 0.6491,
+        "tp": 603,
+        "fp": 652,
+        "tn": 245,
+        "fn": 0
+      },
+      {
+        "threshold": 0.4,
+        "precision": 0.8105,
+        "recall": 1,
+        "f1": 0.8953,
+        "tp": 603,
+        "fp": 141,
+        "tn": 756,
+        "fn": 0
+      },
+      {
+        "threshold": 0.5,
+        "precision": 0.82,
+        "recall": 0.937,
+        "f1": 0.8746,
+        "tp": 565,
+        "fp": 124,
+        "tn": 773,
+        "fn": 38
+      },
+      {
+        "threshold": 0.6,
+        "precision": 0.8669,
+        "recall": 0.7993,
+        "f1": 0.8318,
+        "tp": 482,
+        "fp": 74,
+        "tn": 823,
+        "fn": 121
+      },
+      {
+        "threshold": 0.7,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0,
+        "tp": 0,
+        "fp": 0,
+        "tn": 897,
+        "fn": 603
+      },
+      {
+        "threshold": 0.8,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0,
+        "tp": 0,
+        "fp": 0,
+        "tn": 897,
+        "fn": 603
+      }
+    ],
+    "confusion_matrix": {
+      "tp": 565,
+      "fp": 124,
+      "tn": 773,
+      "fn": 38
+    }
+  },
+  "calibration": {
+    "brier_before": 0.079,
+    "brier_after": 0.1444,
+    "method": "Platt Scaling (Sigmoidal Logistic Calibration)",
+    "platt_a": 1.6963,
+    "platt_b": -0.8986
+  },
+  "top_predictive_features": [
+    {
+      "feature": "memory_recovery_rate",
+      "importance": 1.2929,
+      "coefficient": 1.2929
+    },
+    {
+      "feature": "failure_severity",
+      "importance": 0.6967,
+      "coefficient": -0.6967
+    },
+    {
+      "feature": "error_source_customer",
+      "importance": 0.6104,
+      "coefficient": -0.6104
+    },
+    {
+      "feature": "failure_category_invalid_payment_method",
+      "importance": 0.4037,
+      "coefficient": -0.4037
+    },
+    {
+      "feature": "safety_decision_blocked",
+      "importance": 0.4037,
+      "coefficient": -0.4037
+    },
+    {
+      "feature": "failure_category_retryable",
+      "importance": 0.3958,
+      "coefficient": 0.3958
+    },
+    {
+      "feature": "priority_level_critical",
+      "importance": 0.3429,
+      "coefficient": -0.3429
+    },
+    {
+      "feature": "attempt_ratio",
+      "importance": 0.3296,
+      "coefficient": -0.3296
+    },
+    {
+      "feature": "failure_category_insufficient_funds",
+      "importance": 0.309,
+      "coefficient": -0.309
+    },
+    {
+      "feature": "error_source_gateway",
+      "importance": 0.2317,
+      "coefficient": 0.2317
+    }
+  ],
+  "error_analysis": {
+    "by_failure_category": [
+      {
+        "category": "retryable",
+        "total_cases": 552,
+        "false_positives": 79,
+        "false_negatives": 0,
+        "fp_rate": 14.3,
+        "fn_rate": 0
+      },
+      {
+        "category": "invalid_payment_method",
+        "total_cases": 368,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "fp_rate": 0,
+        "fn_rate": 0
+      },
+      {
+        "category": "risk_failure",
+        "total_cases": 188,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "fp_rate": 0,
+        "fn_rate": 0
+      },
+      {
+        "category": "insufficient_funds",
+        "total_cases": 185,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "fp_rate": 0,
+        "fn_rate": 0
+      },
+      {
+        "category": "authentication_failure",
+        "total_cases": 207,
+        "false_positives": 55,
+        "false_negatives": 30,
+        "fp_rate": 26.6,
+        "fn_rate": 14.5
+      }
+    ],
+    "by_payment_method": [
+      {
+        "category": "wallet",
+        "total_cases": 341,
+        "false_positives": 39,
+        "false_negatives": 4,
+        "fp_rate": 11.4,
+        "fn_rate": 1.2
+      },
+      {
+        "category": "netbanking",
+        "total_cases": 340,
+        "false_positives": 32,
+        "false_negatives": 11,
+        "fp_rate": 9.4,
+        "fn_rate": 3.2
+      },
+      {
+        "category": "upi",
+        "total_cases": 391,
+        "false_positives": 29,
+        "false_negatives": 6,
+        "fp_rate": 7.4,
+        "fn_rate": 1.5
+      },
+      {
+        "category": "card",
+        "total_cases": 428,
+        "false_positives": 34,
+        "false_negatives": 9,
+        "fp_rate": 7.9,
+        "fn_rate": 2.1
+      }
+    ],
+    "by_attempts_before_action": [
+      {
+        "category": "1",
+        "total_cases": 1500,
+        "false_positives": 134,
+        "false_negatives": 30,
+        "fp_rate": 8.9,
+        "fn_rate": 2
+      }
+    ],
+    "by_priority_level": [
+      {
+        "category": "critical",
+        "total_cases": 1159,
+        "false_positives": 76,
+        "false_negatives": 0,
+        "fp_rate": 6.6,
+        "fn_rate": 0
+      },
+      {
+        "category": "high",
+        "total_cases": 337,
+        "false_positives": 57,
+        "false_negatives": 30,
+        "fp_rate": 16.9,
+        "fn_rate": 8.9
+      },
+      {
+        "category": "medium",
+        "total_cases": 4,
+        "false_positives": 1,
+        "false_negatives": 0,
+        "fp_rate": 25,
+        "fn_rate": 0
+      }
+    ]
+  },
+  "created_at": "2026-08-22T10:06:50.080Z"
+}
