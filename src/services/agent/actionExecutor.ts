@@ -106,11 +106,10 @@ export async function executeRecoveryAction(
     }
 
     case 'retry_later': {
-      const nextAttempt = transaction.attempts + 1;
       const targetStatus: TransactionStatus = 'retry_scheduled';
       const nextRetryAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-      const dbSuccess = await updateTransactionInDb(transaction.id, targetStatus, nextAttempt, nextRetryAt);
+      const dbSuccess = await updateTransactionInDb(transaction.id, targetStatus, undefined, nextRetryAt);
 
       if (!dbSuccess) {
         return {
@@ -128,9 +127,9 @@ export async function executeRecoveryAction(
         action: strategy,
         status: 'executed',
         outcome: 'retry_scheduled',
-        attempts: nextAttempt,
+        attempts: transaction.attempts,
         nextRetryAt,
-        reason: `Retry scheduled for next execution window (${new Date(nextRetryAt).toLocaleTimeString()}). Attempt count incremented to ${nextAttempt}/${transaction.max_attempts}.`,
+        reason: `Retry scheduled for next execution window (${new Date(nextRetryAt).toLocaleTimeString()}). Payment attempt count preserved at ${transaction.attempts}/${transaction.max_attempts}.`,
         executedAt
       };
     }

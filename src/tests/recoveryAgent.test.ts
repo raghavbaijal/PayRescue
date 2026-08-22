@@ -25,7 +25,86 @@ function createMockTransaction(overrides: Partial<Transaction> = {}): Transactio
   };
 }
 
-describe('PayRescue Phase 5.3 — Controlled Agent Execution & Outcome Evaluation Tests', () => {
+describe('PayRescue Phase 5.3 — Controlled Agent Execution & Option B Attempt Semantics Tests', () => {
+  // Option B Specific Test 1: retry_later does NOT increment attempts
+  it('Option B Reg 1: retry_later strategy does NOT increment attempts count', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'authentication_failed',
+      attempts: 1
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
+
+    if (result.execution.action === 'retry_later') {
+      expect(result.execution.attempts).toBe(1); // Attempts preserved at 1!
+      expect(result.newTransactionStatus).toBe('retry_scheduled');
+    }
+  });
+
+  // Option B Specific Test 2: retry_now DOES increment attempts
+  it('Option B Reg 2: retry_now strategy DOES increment attempts count on payment execution', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'gateway_technical_error',
+      attempts: 1
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    expect(decision.recommendedAction).toBe('retry_scheduled');
+
+    const result = await executeAgentDecision(tx, decision);
+    expect(result.execution.attempts).toBe(2); // Incremented 1 -> 2 on retry_now!
+  });
+
+  // Option B Specific Test 3: retry_later sets next_retry_at
+  it('Option B Reg 3: retry_later sets next_retry_at timestamp into future window', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'authentication_failed',
+      attempts: 1
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
+
+    if (result.execution.action === 'retry_later') {
+      expect(result.execution.nextRetryAt).toBeDefined();
+      expect(new Date(result.execution.nextRetryAt!).getTime()).toBeGreaterThan(Date.now());
+    }
+  });
+
+  // Option B Specific Test 4: retry_later preserves attempts after successful persistence
+  it('Option B Reg 4: retry_later preserves attempt count after successful DB update', async () => {
+    const tx = createMockTransaction({
+      attempts: 1
+    });
+
+    const decision = {
+      transactionId: tx.id,
+      status: 'approved' as const,
+      recommendedAction: 'retry_scheduled' as const,
+      strategy: 'retry_later' as const,
+      confidence: 0.9,
+      reasoning: 'Test scheduling',
+      safety: { decision: 'eligible' as const, reason: 'Safe' }
+    };
+
+    const result = await executeAgentDecision(tx, decision as any);
+    expect(result.execution.attempts).toBe(1);
+  });
+
+  // Option B Specific Test 5: retry_now increments attempts only when payment execution actually occurs
+  it('Option B Reg 5: retry_now increments attempts only when payment execution actually occurs', async () => {
+    const tx = createMockTransaction({
+      error_reason: 'bank_technical_error',
+      attempts: 2
+    });
+
+    const decision = await runRecoveryAgent(tx);
+    const result = await executeAgentDecision(tx, decision);
+
+    expect(result.execution.attempts).toBe(3);
+  });
+
   // Phase 5.2 Tests baseline
   it('Phase 5.2 Test: Prioritization and strategy selection are side-effect free', () => {
     const tx = createMockTransaction({ amount_paise: 1000000 });

@@ -15,6 +15,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# ML generated datasets
+data/ml/*.csv
+!data/ml/.gitkeep
 
 # Editor directories and files
 .vscode/*

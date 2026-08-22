@@ -1,0 +1,89 @@
+{
+  "dataset_version": "1.0.0",
+  "generator_version": "1.0.0",
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51
+  ],
+  "totalEpisodes": 10000,
+  "generatedAt": "2026-08-22T07:30:02.694Z",
+  "positive_count": 3978,
+  "negative_count": 6022,
+  "eventualRecoveryRate": 39.8,
+  "immediate_success_count": 2080,
+  "immediateActionSuccessRate": 20.8,
+  "terminalOutcomeDistribution": {
+    "recovered": 3978,
+    "escalated": 1298,
+    "stopped": 4724
+  },
+  "firstStrategyDistribution": {
+    "alternate_payment": 2433,
+    "retry_later": 2537,
+    "escalate": 1298,
+    "retry_now": 2463,
+    "promise_to_pay": 1269
+  },
+  "failureCategoryDistribution": {
+    "invalid_payment_method": 2433,
+    "retryable": 3732,
+    "risk_failure": 1298,
+    "authentication_failure": 1268,
+    "insufficient_funds": 1269
+  },
+  "errorReasonDistribution": {
+    "card_expired": 1242,
+    "debit_instrument_blocked": 1191,
+    "payment_timed_out": 1269,
+    "payment_risk_check_failed": 1298,
+    "bank_technical_error": 1231,
+    "authentication_failed": 1268,
+    "insufficient_funds": 1269,
+    "gateway_technical_error": 1232
+  },
+  "paymentMethodDistribution": {
+    "card": 2520,
+    "upi": 2486,
+    "netbanking": 2497,
+    "wallet": 2497
+  },
+  "attempts_before_action_distribution": {
+    "1": 10000
+  },
+  "total_steps_distribution": {
+    "1": 7080,
+    "2": 2231,
+    "3": 689
+  },
+  "totalSteps": 13609,
+  "averageStepsPerEpisode": 1.36,
+  "maxStepsObserved": 3,
+  "totalAttemptedAmountRupees": 251920696,
+  "totalRecoveredAmountRupees": 100569521,
+  "amount_statistics": {
+    "min": 200,
+    "max": 49996,
+    "mean": 25192,
+    "median": 25200
+  },
+  "simulator_execution_count": 6072,
+  "simulator_success_count": 3978,
+  "simulator_success_rate": 65.5,
+  "missing_value_counts": 0,
+  "duplicate_episode_count": 0,
+  "dataLeakageValidation": {
+    "preActionFeatureCount": 26,
+    "postActionLabelCount": 15,
+    "zeroLeakageVerified": true,
+    "temporalLeakageVerified": true,
+    "crossSeedDuplicationVerified": true
+  }
+}
